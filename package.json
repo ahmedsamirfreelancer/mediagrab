@@ -51,7 +51,8 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "server/**/*"
+      "server/**/*",
+      "node_modules/**/*"
     ],
     "publish": [
       {
