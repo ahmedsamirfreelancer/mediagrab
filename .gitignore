@@ -1,0 +1,30 @@
+node_modules/
+dist/
+dist-pkg/
+win-unpacked/
+MediaGrab-win32-x64/
+.obfuscate-backup/
+
+# Build/runtime secrets
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Bundled binaries are heavy; users can download them once.
+# Comment out if you want them in git.
+# resources/yt-dlp.exe
+# resources/ffmpeg.exe
+# resources/ffprobe.exe
+
+# Runtime data
+data/
+last_results.json
+queue_state.json
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/

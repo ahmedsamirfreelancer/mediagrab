@@ -1,0 +1,86 @@
+{
+  "name": "mediagrab",
+  "version": "1.0.0",
+  "description": "MediaGrab — Multi-platform video downloader",
+  "main": "main.js",
+  "author": "Ahmed",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "obfuscate": "node scripts/obfuscate.js",
+    "restore": "node scripts/restore.js",
+    "build": "node scripts/obfuscate.js && electron-builder --win nsis && node scripts/restore.js",
+    "build:noobf": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.4",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.0.0",
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8",
+    "javascript-obfuscator": "^4.1.1"
+  },
+  "build": {
+    "appId": "com.arqami.mediagrab",
+    "productName": "MediaGrab",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "license/**/*",
+      "server/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "server/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://arqami.app/downloads/mediagrab",
+        "channel": "latest"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "MediaGrab-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MediaGrab",
+      "installerLanguages": [
+        "en_US",
+        "ar_SA"
+      ],
+      "language": "1033"
+    }
+  }
+}
