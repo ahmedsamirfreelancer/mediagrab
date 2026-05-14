@@ -11,11 +11,11 @@ MediaGrab-win32-x64/
 .env.production
 .env.*.local
 
-# Bundled binaries are heavy; users can download them once.
-# Comment out if you want them in git.
-# resources/yt-dlp.exe
-# resources/ffmpeg.exe
-# resources/ffprobe.exe
+# Bundled binaries are downloaded by scripts/download-binaries.js
+# (~200MB combined — too big for git).
+resources/yt-dlp.exe
+resources/ffmpeg.exe
+resources/ffprobe.exe
 
 # Runtime data
 data/

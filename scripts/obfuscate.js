@@ -92,6 +92,13 @@ function backupAndObfuscate(rel) {
       throw new Error('license/client.js no longer contains __BUILD_TIME_SECRET__ placeholder');
     }
     code = code.replace(/'__BUILD_TIME_SECRET__'/g, JSON.stringify(BUILD_SECRET));
+
+    // Optional owner license key — wipes to empty string if MEDIAGRAB_OWNER_KEY
+    // is not set, so customer builds don't ship a working key.
+    const ownerKey = process.env.MEDIAGRAB_OWNER_KEY
+      || readEnvFile('.env.production', 'MEDIAGRAB_OWNER_KEY')
+      || '';
+    code = code.replace(/'__BUILD_TIME_OWNER_KEY__'/g, JSON.stringify(ownerKey));
   }
 
   const result = JavaScriptObfuscator.obfuscate(code, OPTIONS);

@@ -28,6 +28,13 @@ const APP_VERSION = '1.0.0';
 // In dev, MEDIAGRAB_LICENSE_SECRET env can override.
 const TOKEN_SECRET = process.env.MEDIAGRAB_LICENSE_SECRET || '__BUILD_TIME_SECRET__';
 
+// Optional owner license key. If a value is baked in at build time, the app
+// will auto-activate with it on first launch (no manual key entry needed for
+// the owner's own machines). Leave as the placeholder for customer builds —
+// scripts/obfuscate.js wipes it to an empty string unless MEDIAGRAB_OWNER_KEY
+// is set in the build env.
+const OWNER_KEY = process.env.MEDIAGRAB_OWNER_KEY || '__BUILD_TIME_OWNER_KEY__';
+
 const GRACE_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -253,6 +260,22 @@ async function validate() {
   return { valid: false, reason: result?.reason || 'invalid' };
 }
 
+/**
+ * Try to silently activate using the owner key baked in at build time.
+ * Returns true if activation succeeded (caller can skip the activation UI).
+ * No-op if no owner key was provided at build time, or if a license is
+ * already active.
+ */
+async function tryAutoActivateWithOwnerKey() {
+  if (isValid()) return true;
+  const key = (OWNER_KEY || '').trim();
+  if (!key || key === '__BUILD_TIME_OWNER_KEY__') return false;
+  try {
+    const res = await activate(key);
+    return res.success === true;
+  } catch { return false; }
+}
+
 function isValid() {
   if (cache.status !== 'active') return false;
   if (cache.expiresAt && new Date(cache.expiresAt) < new Date()) return false;
@@ -296,4 +319,5 @@ module.exports = {
   getStatus,
   startCron,
   getHardwareFingerprint,
+  tryAutoActivateWithOwnerKey,
 };

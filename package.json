@@ -6,6 +6,8 @@
   "author": "Ahmed",
   "license": "UNLICENSED",
   "scripts": {
+    "postinstall": "node scripts/download-binaries.js && electron-builder install-app-deps || true",
+    "binaries": "node scripts/download-binaries.js",
     "start": "electron .",
     "obfuscate": "node scripts/obfuscate.js",
     "restore": "node scripts/restore.js",
@@ -53,9 +55,10 @@
     ],
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://arqami.app/downloads/mediagrab",
-        "channel": "latest"
+        "provider": "github",
+        "owner": "ahmedsamirfreelancer",
+        "repo": "mediagrab",
+        "releaseType": "release"
       }
     ],
     "win": {

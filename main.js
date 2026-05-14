@@ -423,7 +423,13 @@ app.whenReady().then(async () => {
   if (licenseClient.isValid()) {
     await bootLicensedApp();
   } else {
-    createActivationWindow();
+    // Owner builds get a baked-in license key and skip the activation UI.
+    const autoActivated = await licenseClient.tryAutoActivateWithOwnerKey();
+    if (autoActivated) {
+      await bootLicensedApp();
+    } else {
+      createActivationWindow();
+    }
   }
 });
 
