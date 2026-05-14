@@ -22,11 +22,21 @@ const BACKUP_DIR = path.join(ROOT, '.obfuscate-backup');
 // Focus obfuscation on files that hold license logic + secrets. Leaving
 // server/server.js readable means the dev loop stays fast and Express
 // middleware quirks don't surface as obfuscation bugs.
+// NOTE: client.js is excluded because the obfuscator was breaking the
+// async activate flow (network call fired but the result wasn't being
+// returned to main.js). Secrets are still injected at build time but the
+// final code is readable — acceptable tradeoff since the bigger protection
+// is the token signature, not the obfuscation.
 const TARGETS = [
   'main.js',
-  'license/client.js',
   'license/preload.js',
   'license/activate.js',
+];
+
+// Files that still need build-time secret injection but should NOT be
+// obfuscated. We rewrite them in place from the backup, then leave them be.
+const SECRET_INJECT_ONLY = [
+  'license/client.js',
 ];
 
 // Moderate obfuscation — keeps Express/Socket.IO working.
@@ -69,45 +79,54 @@ if (!BUILD_SECRET) {
   process.exit(1);
 }
 
-function backupAndObfuscate(rel) {
+function backupRestore(rel) {
   const src = path.join(ROOT, rel);
-  if (!fs.existsSync(src)) {
-    console.warn(`  skip (missing): ${rel}`);
-    return;
-  }
+  if (!fs.existsSync(src)) return null;
   const backup = path.join(BACKUP_DIR, rel);
   fs.mkdirSync(path.dirname(backup), { recursive: true });
   if (!fs.existsSync(backup)) {
     fs.copyFileSync(src, backup);
   } else {
-    // Restore from backup so we always obfuscate the pristine source.
     fs.copyFileSync(backup, src);
   }
+  return src;
+}
 
-  let code = fs.readFileSync(src, 'utf8');
-
-  // Inject the build-time secret into license/client.js.
-  if (rel === 'license/client.js') {
-    if (!code.includes('__BUILD_TIME_SECRET__')) {
-      throw new Error('license/client.js no longer contains __BUILD_TIME_SECRET__ placeholder');
-    }
-    code = code.replace(/'__BUILD_TIME_SECRET__'/g, JSON.stringify(BUILD_SECRET));
-
-    // Optional owner license key — wipes to empty string if MEDIAGRAB_OWNER_KEY
-    // is not set, so customer builds don't ship a working key.
-    const ownerKey = process.env.MEDIAGRAB_OWNER_KEY
-      || readEnvFile('.env.production', 'MEDIAGRAB_OWNER_KEY')
-      || '';
-    code = code.replace(/'__BUILD_TIME_OWNER_KEY__'/g, JSON.stringify(ownerKey));
+function injectSecrets(code, rel) {
+  if (rel !== 'license/client.js') return code;
+  if (!code.includes('__BUILD_TIME_SECRET__')) {
+    throw new Error('license/client.js no longer contains __BUILD_TIME_SECRET__ placeholder');
   }
+  code = code.replace(/'__BUILD_TIME_SECRET__'/g, JSON.stringify(BUILD_SECRET));
+  const ownerKey = process.env.MEDIAGRAB_OWNER_KEY
+    || readEnvFile('.env.production', 'MEDIAGRAB_OWNER_KEY')
+    || '';
+  code = code.replace(/'__BUILD_TIME_OWNER_KEY__'/g, JSON.stringify(ownerKey));
+  return code;
+}
 
+function backupAndObfuscate(rel) {
+  const src = backupRestore(rel);
+  if (!src) { console.warn(`  skip (missing): ${rel}`); return; }
+  let code = fs.readFileSync(src, 'utf8');
+  code = injectSecrets(code, rel);
   const result = JavaScriptObfuscator.obfuscate(code, OPTIONS);
   fs.writeFileSync(src, result.getObfuscatedCode());
   console.log(`  obfuscated: ${rel} (${code.length} → ${result.getObfuscatedCode().length} bytes)`);
 }
 
+function injectOnly(rel) {
+  const src = backupRestore(rel);
+  if (!src) { console.warn(`  skip (missing): ${rel}`); return; }
+  let code = fs.readFileSync(src, 'utf8');
+  code = injectSecrets(code, rel);
+  fs.writeFileSync(src, code);
+  console.log(`  secrets injected (not obfuscated): ${rel}`);
+}
+
 function main() {
   console.log('▶ MediaGrab obfuscate');
+  for (const t of SECRET_INJECT_ONLY) injectOnly(t);
   for (const t of TARGETS) backupAndObfuscate(t);
   console.log('✓ Done. Originals backed up at .obfuscate-backup/');
 }
