@@ -2,6 +2,8 @@
    MediaGrab - Professional Dark Theme
    ============================================ */
 
+@import url('/fonts/zain.css');
+
 :root {
   --bg-primary: #0f0f0f;
   --bg-secondary: #1a1a2e;
@@ -52,7 +54,7 @@
   --transition: 0.2s ease;
   --transition-slow: 0.35s ease;
 
-  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --font: 'Zain', 'Inter', system-ui, -apple-system, sans-serif;
 }
 
 /* ---- Reset & Base ---- */
