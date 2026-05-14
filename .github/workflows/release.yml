@@ -62,11 +62,23 @@ jobs:
         if: steps.cache-binaries.outputs.cache-hit != 'true'
         run: node scripts/download-binaries.js
 
-      - name: Build installer (obfuscate + electron-builder + publish)
+      - name: Obfuscate sources
+        env:
+          MEDIAGRAB_BUILD_SECRET: ${{ secrets.MEDIAGRAB_BUILD_SECRET }}
+          MEDIAGRAB_OWNER_KEY: ${{ secrets.MEDIAGRAB_OWNER_KEY }}
+        run: node scripts/obfuscate.js
+
+      - name: Build + publish installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MEDIAGRAB_BUILD_SECRET: ${{ secrets.MEDIAGRAB_BUILD_SECRET }}
-        run: npm run build -- --publish always
+        # `--publish always` creates the GitHub release if missing.
+        # We invoke electron-builder directly so this flag actually reaches it
+        # (passing through `npm run build -- ...` is finicky in cmd/PowerShell).
+        run: npx electron-builder --win nsis --publish always
+
+      - name: Restore original sources
+        if: always()
+        run: node scripts/restore.js
 
       - name: Commit version bump (manual dispatch only)
         if: github.event_name == 'workflow_dispatch' && inputs.version_bump != ''
