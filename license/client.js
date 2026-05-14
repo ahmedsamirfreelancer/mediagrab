@@ -180,14 +180,25 @@ async function apiCall(endpoint, extra = {}) {
 
 /* ─── Public API ───────────────────────────────────────────────────────── */
 
+function debugLog(msg) {
+  try {
+    const f = storeFile ? storeFile + '.log' : require('os').tmpdir() + '/mediagrab-license.log';
+    fs.appendFileSync(f, new Date().toISOString() + ' ' + msg + '\n');
+  } catch {}
+}
+
 async function activate(licenseKey) {
   const key = String(licenseKey || '').trim();
+  debugLog('activate() start, key=' + (key ? key.slice(0,8)+'...' : 'EMPTY'));
   if (!key) return { success: false, message: 'أدخل مفتاح الترخيص' };
 
   let result;
   try {
+    debugLog('calling api ' + API_BASE + '/activate');
     result = await apiCall('activate', { license_key: key });
+    debugLog('api response: ' + JSON.stringify(result).slice(0, 300));
   } catch (e) {
+    debugLog('api error: ' + (e && e.message || e));
     return { success: false, message: 'فشل الاتصال بسيرفر التراخيص: ' + e.message };
   }
 
@@ -267,13 +278,21 @@ async function validate() {
  * already active.
  */
 async function tryAutoActivateWithOwnerKey() {
-  if (isValid()) return true;
+  debugLog('tryAutoActivateWithOwnerKey() entered, OWNER_KEY=' + (OWNER_KEY ? OWNER_KEY.slice(0,12)+'...len='+OWNER_KEY.length : 'EMPTY/NULL'));
+  if (isValid()) { debugLog('already valid, skipping'); return true; }
   const key = (OWNER_KEY || '').trim();
-  if (!key || key === '__BUILD_TIME_OWNER_KEY__') return false;
+  if (!key || key === '__BUILD_TIME_OWNER_KEY__') {
+    debugLog('no usable owner key (placeholder or empty), aborting auto-activate');
+    return false;
+  }
   try {
     const res = await activate(key);
+    debugLog('auto-activate result: ' + JSON.stringify(res));
     return res.success === true;
-  } catch { return false; }
+  } catch (e) {
+    debugLog('auto-activate threw: ' + (e && e.message || e));
+    return false;
+  }
 }
 
 function isValid() {
