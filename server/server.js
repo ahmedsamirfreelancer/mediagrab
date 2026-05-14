@@ -354,6 +354,56 @@ async function tikwmSerializedRequest(reqUrl, options) {
   return apiRequest(reqUrl, options);
 }
 
+// Paginated TikWM user feed. yt-dlp's TikTok extractor caps out around
+// 300 videos before TikTok throttles it, but TikWM's user/posts endpoint
+// pages cursor-by-cursor reliably, so we go through it for channel listings.
+//
+// onItem(item, indexStartingAt1) is fired for each video so the caller can
+// stream results to the UI as they arrive.
+async function tikwmUserPosts(username, { maxCount = 2000, onItem = null } = {}) {
+  const out = [];
+  let cursor = '0';
+  let idx = 0;
+  while (out.length < maxCount) {
+    const url = `https://www.tikwm.com/api/user/posts?unique_id=${encodeURIComponent(username)}&count=30&cursor=${encodeURIComponent(cursor)}&web=1&hd=1`;
+    let data;
+    try {
+      data = await tikwmSerializedRequest(url);
+    } catch (e) {
+      // Soft-fail: return whatever we got so far instead of throwing the
+      // whole listing away.
+      break;
+    }
+    if (data.code !== 0 || !data.data) break;
+    const videos = data.data.videos || [];
+    if (!videos.length) break;
+    for (const d of videos) {
+      idx++;
+      const item = {
+        id: d.video_id || d.id,
+        title: d.title || '',
+        cover: d.cover || d.origin_cover || '',
+        thumbnail: d.cover || d.origin_cover || '',
+        duration: d.duration || 0,
+        author: { nickname: d.author?.nickname || username, unique_id: d.author?.unique_id || username },
+        play_count: d.play_count || 0,
+        views: d.play_count || 0,
+        play: d.play || null,
+        hdplay: d.hdplay || null,
+        url: `https://www.tiktok.com/@${d.author?.unique_id || username}/video/${d.video_id || d.id}`,
+        platform: 'tiktok',
+      };
+      out.push(item);
+      if (onItem) onItem(item, out.length);
+      if (out.length >= maxCount) break;
+    }
+    if (!data.data.hasMore) break;
+    cursor = String(data.data.cursor || '');
+    if (!cursor || cursor === '0') break;
+  }
+  return out;
+}
+
 async function tikwmGetVideo(videoUrl, retries = 4) {
   let lastErr = null;
   for (let i = 0; i < retries; i++) {
@@ -801,23 +851,29 @@ app.post('/api/info', async (req, res) => {
     if (plat === 'tiktok') {
       if (isTikTokUser(targetUrl)) {
         const username = targetUrl.match(/@([^/?]+)/)?.[1];
-        const cleanUrl = `https://www.tiktok.com/@${username}`;
-        const info = await ytdlpInfo(cleanUrl, true);
-        const videos = Array.isArray(info) ? info : [info];
 
-        // Fast listing — no per-video TikWM calls. Download URLs are fetched
-        // lazily when the user clicks Download.
-        const enrichedVideos = videos.map((v) => ({
-          id: v.id,
-          title: v.title || `Video ${v.id}`,
-          cover: v.thumbnails?.[0]?.url || v.thumbnail || '',
-          duration: v.duration,
-          author: { nickname: v.uploader || username, unique_id: username },
-          play_count: v.view_count || 0,
-          play: null,
-          hdplay: null,
-          url: v.url || v.webpage_url,
-        }));
+        // Prefer TikWM's paginated user/posts API — yt-dlp's TikTok extractor
+        // stops at ~300 because TikTok throttles it, while TikWM pages cleanly.
+        let enrichedVideos = await tikwmUserPosts(username, { maxCount: 2000 });
+
+        // yt-dlp fallback in case TikWM returns nothing (banned user, region
+        // block, TikWM downtime).
+        if (!enrichedVideos.length) {
+          const cleanUrl = `https://www.tiktok.com/@${username}`;
+          const info = await ytdlpInfo(cleanUrl, true);
+          const videos = Array.isArray(info) ? info : [info];
+          enrichedVideos = videos.map((v) => ({
+            id: v.id,
+            title: v.title || `Video ${v.id}`,
+            cover: v.thumbnails?.[0]?.url || v.thumbnail || '',
+            duration: v.duration,
+            author: { nickname: v.uploader || username, unique_id: username },
+            play_count: v.view_count || 0,
+            play: null,
+            hdplay: null,
+            url: v.url || v.webpage_url,
+          }));
+        }
 
         return res.json({ type: 'channel', platform: 'tiktok', data: { videos: enrichedVideos } });
       } else {
@@ -1249,6 +1305,21 @@ app.post('/api/info-stream', async (req, res) => {
       platform: plat || 'other',
     };
 
+    // TikTok user pages: stream via TikWM's paginated API (deeper + faster
+    // than yt-dlp). Other URLs still use the yt-dlp path.
+    if (isUserPage && username) {
+      try {
+        await tikwmUserPosts(username, {
+          maxCount: 2000,
+          onItem: (item, idx) => {
+            count = idx;
+            emit('listing:item', { item: { ...item, platform: 'tiktok' }, index: idx });
+          },
+        });
+      } catch (e) { /* fall through to yt-dlp */ }
+      if (count > 0) { emit('listing:complete', { count }); return; }
+    }
+
     // Cache hit → emit all items immediately, no yt-dlp run.
     const cached = getYtdlpInfoCached(cleanUrl, true);
     if (cached) {
@@ -1282,7 +1353,7 @@ app.post('/api/search', async (req, res) => {
   try {
     const { query, platform, count = 30, mode } = req.body || {};
     if (!query || typeof query !== 'string') return res.status(400).json({ error: 'Query is required' });
-    const safeCount = Math.max(1, Math.min(100, parseInt(count, 10) || 30));
+    const safeCount = Math.max(1, Math.min(500, parseInt(count, 10) || 30));
     const plat = (platform || '').toLowerCase();
 
     if (plat === 'instagram') {

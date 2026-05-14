@@ -442,7 +442,9 @@
   async function searchVideos(query) {
     showLoading(true);
     try {
-      const payload = { query, platform: state.platform };
+      // Default to 200 results (server caps at 500). 30 was way too few for
+      // discovery-style searches where the user wants to filter/sort after.
+      const payload = { query, platform: state.platform, count: 200 };
       // Instagram + Facebook: detect mode from prefix. @user → account, otherwise hashtag.
       if (state.platform === 'instagram' || state.platform === 'facebook') {
         const trimmed = query.trim();
