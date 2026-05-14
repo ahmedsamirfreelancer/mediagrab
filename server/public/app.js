@@ -1889,9 +1889,16 @@
     }, duration);
   }
 
-  // Open file via server
+  // Open file — prefer Electron's shell.openPath (Unicode-safe). Falls back
+  // to the legacy server endpoint if running outside Electron.
   function openDownloadedFile(filePath) {
     if (!filePath) return toast('مسار الملف غير معروف', 'warning');
+    if (window.electronAPI?.shell) {
+      window.electronAPI.shell.openPath(filePath).then((d) => {
+        if (!d?.success) toast(d?.error || 'فشل فتح الملف', 'error');
+      }).catch(() => toast('فشل فتح الملف', 'error'));
+      return;
+    }
     fetch('/api/open-file', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1903,6 +1910,12 @@
 
   function openDownloadedFolder(filePath) {
     if (!filePath) return toast('مسار الملف غير معروف', 'warning');
+    if (window.electronAPI?.shell) {
+      window.electronAPI.shell.showItemInFolder(filePath).then((d) => {
+        if (!d?.success) toast(d?.error || 'فشل فتح المجلد', 'error');
+      }).catch(() => toast('فشل فتح المجلد', 'error'));
+      return;
+    }
     fetch('/api/open-folder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

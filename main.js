@@ -152,6 +152,36 @@ ipcMain.handle('license:openExternal', async (_evt, url) => {
   if (typeof url === 'string' && /^https?:\/\//.test(url)) shell.openExternal(url);
 });
 
+/* ─── Shell helpers (opening downloaded files/folders) ───────────────────── */
+
+ipcMain.handle('shell:showItemInFolder', async (_evt, filePath) => {
+  if (typeof filePath !== 'string' || !filePath) return { success: false };
+  try {
+    if (fs.existsSync(filePath)) {
+      shell.showItemInFolder(filePath);
+      return { success: true };
+    }
+    const folder = path.dirname(filePath);
+    if (fs.existsSync(folder)) {
+      const err = await shell.openPath(folder);
+      return err ? { success: false, error: err } : { success: true };
+    }
+    return { success: false, error: 'Neither file nor folder exists' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('shell:openPath', async (_evt, filePath) => {
+  if (typeof filePath !== 'string' || !filePath) return { success: false };
+  try {
+    const err = await shell.openPath(filePath);
+    return err ? { success: false, error: err } : { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 /* ─── Instagram in-app login ─────────────────────────────────────────────── */
 
 const IG_SESSION_PARTITION = 'persist:instagram';

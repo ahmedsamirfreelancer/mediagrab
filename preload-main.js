@@ -23,4 +23,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     check: () => ipcRenderer.invoke('ytdlp:check'),
     update: () => ipcRenderer.invoke('ytdlp:update'),
   },
+  // Shell — used to open the downloaded file/folder. Avoids spawning
+  // explorer.exe from the forked Node server, which mishandles UTF-8
+  // paths and detached output.
+  shell: {
+    showItemInFolder: (filePath) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
+    openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
+  },
 });
