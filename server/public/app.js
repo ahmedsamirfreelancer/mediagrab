@@ -345,6 +345,9 @@
     try {
       await apiCall('/download', {
         url, platform: state.platform, id,
+        title: info?.title || '',
+        author: info?.author || '',
+        videoId: info?.id || null,
         quality: info?.quality || state.settings.quality,
         outputDir: state.settings.outputDir,
         filenameTemplate: state.settings.filenameTemplate,

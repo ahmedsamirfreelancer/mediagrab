@@ -893,10 +893,10 @@ app.post('/api/download', async (req, res) => {
       tasks.push({
         id: clientId || uuidv4(),
         url: targetUrl,
-        title: 'Video',
+        title: (req.body?.title && String(req.body.title).trim()) || '',
         downloadUrl: clientDownloadUrl || null,
         hdDownloadUrl: clientHdDownloadUrl || null,
-        author: '',
+        author: req.body?.author || '',
         platform: plat,
         videoId: req.body?.videoId || null,
       });
@@ -1007,8 +1007,13 @@ async function runDownloadOnce(task, entry, ctx) {
   emitProgress(task.id, { title: task.title, progress: 0, speed: '', status: 'downloading' });
 
   let filePath;
+  // Fall back to a unique-ish placeholder if title is empty, so TikTok results
+  // with no title don't all collapse to "video.mp4".
+  const vidId = extractVideoId(task);
+  const titleForName = (task.title && String(task.title).trim())
+    || (vidId ? `Video ${vidId}` : `Video ${String(task.id).slice(0, 8)}`);
   const filenameBase = applyFilenameTemplate(filenameTemplate, {
-    title: task.title,
+    title: titleForName,
     author: task.author,
     id: task.id,
     platform: task.platform || plat,
@@ -1044,25 +1049,6 @@ async function runDownloadOnce(task, entry, ctx) {
     }
   }
 
-  // Skip-existing for TikWM (yt-dlp uses --no-overwrites)
-  if (skipExisting && plat === 'tiktok') {
-    const candidate = path.join(taskOutputDir, filenameBase + '.mp4');
-    if (fs.existsSync(candidate)) {
-      emitProgress(task.id, {
-        title: task.title, progress: 100, speed: '',
-        status: 'completed', filePath: candidate, skipped: true,
-      });
-      pushCompleted({
-        id: task.id, title: task.title, platform: plat,
-        filePath: candidate, completedAt: new Date().toISOString(),
-        skipped: true,
-      });
-      recordDownloaded(plat, extractVideoId(task), candidate);
-      activeDownloads.delete(task.id);
-      return;
-    }
-  }
-
   if (plat === 'tiktok') {
     if (!task.downloadUrl && !task.hdDownloadUrl) {
       const tikInfo = await tikwmGetVideo(task.url);
@@ -1074,7 +1060,11 @@ async function runDownloadOnce(task, entry, ctx) {
     }
     const videoUrl = task.hdDownloadUrl || task.downloadUrl;
     if (!videoUrl) throw new Error('فشل الحصول على رابط التحميل من TikWM');
-    const destBase = path.join(taskOutputDir, filenameBase + '.mp4');
+    // uniquePath protects against filename collisions when titles repeat
+    // (very common for TikTok search results with near-identical titles).
+    // Cross-session dedupe by video ID still runs above — this only affects
+    // brand-new downloads to a folder that already has a same-named file.
+    const destBase = uniquePath(path.join(taskOutputDir, filenameBase + '.mp4'));
     try {
       filePath = await downloadFile(videoUrl, destBase, task.id, task.title);
     } catch (dlErr) {

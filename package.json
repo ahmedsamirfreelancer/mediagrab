@@ -1,6 +1,6 @@
 {
   "name": "mediagrab",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "MediaGrab — Multi-platform video downloader",
   "main": "main.js",
   "author": "Ahmed",
