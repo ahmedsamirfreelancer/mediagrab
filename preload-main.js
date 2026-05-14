@@ -19,6 +19,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     login: () => ipcRenderer.invoke('facebook:login'),
     logout: () => ipcRenderer.invoke('facebook:logout'),
   },
+  // Manual cookies.txt import — workaround for Chrome 127+ DPAPI lock
+  cookies: {
+    import: (platform) => ipcRenderer.invoke('cookies:import', platform),
+  },
   // License info (read-only; activation happens at the gate before this window opens)
   license: {
     getStatus: () => ipcRenderer.invoke('license:getStatus'),

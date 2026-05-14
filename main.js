@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu, ipcMain, session } = require('electron');
+const { app, BrowserWindow, dialog, shell, Menu, ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
@@ -365,6 +365,48 @@ ipcMain.handle('facebook:logout', async () => {
   await ses.clearStorageData({ storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers'] });
   try { fs.unlinkSync(getFbCookiesFilePath()); } catch {}
   return { success: true };
+});
+
+/* ─── Manual cookies.txt import (workaround for Chrome 127+ DPAPI lock) ────
+ * Chrome on Windows 127+ encrypts its cookie DB with a key tied to the user's
+ * SID + an "app-bound" flag, which yt-dlp can't read via --cookies-from-browser.
+ * Users hit a "Failed to decrypt with DPAPI" error. The escape hatch is to let
+ * them export cookies from any Chrome extension (e.g. "Get cookies.txt LOCALLY")
+ * and copy that file into our data dir — yt-dlp then uses --cookies <file>.
+ */
+function getDataDir() {
+  return path.join(app.getPath('userData'), 'data');
+}
+
+ipcMain.handle('cookies:import', async (_evt, platform) => {
+  if (platform !== 'instagram' && platform !== 'facebook') {
+    return { success: false, error: 'Unsupported platform' };
+  }
+  const result = await dialog.showOpenDialog(mainWin || undefined, {
+    title: `اختر ملف كوكيز ${platform === 'instagram' ? 'Instagram' : 'Facebook'}`,
+    properties: ['openFile'],
+    filters: [{ name: 'Cookies', extensions: ['txt'] }],
+  });
+  if (result.canceled || !result.filePaths?.[0]) return { success: false, cancelled: true };
+  const src = result.filePaths[0];
+  try {
+    const content = fs.readFileSync(src, 'utf8');
+    // Sanity-check: Netscape cookies files start with this header.
+    if (!/Netscape HTTP Cookie File/i.test(content)) {
+      return { success: false, error: 'الملف ده مش Netscape cookies.txt. صدّره من الـ extension تاني.' };
+    }
+    const domainNeedle = platform === 'instagram' ? 'instagram.com' : 'facebook.com';
+    if (!new RegExp(domainNeedle, 'i').test(content)) {
+      return { success: false, error: `الملف مفيهوش كوكيز ${domainNeedle}.` };
+    }
+    const destDir = getDataDir();
+    fs.mkdirSync(destDir, { recursive: true });
+    const dest = path.join(destDir, `${platform}-cookies.txt`);
+    fs.copyFileSync(src, dest);
+    return { success: true, file: dest };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 /* ─── yt-dlp auto-update ─────────────────────────────────────────────────── */

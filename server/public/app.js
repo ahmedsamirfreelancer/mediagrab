@@ -1726,10 +1726,14 @@
     const logoutBtn = document.getElementById('ig-logout-btn');
     if (!statusEl) return;
     try {
-      const { loggedIn } = await window.electronAPI.instagram.status();
+      const { loggedIn, cookiesFile } = await window.electronAPI.instagram.status();
       if (loggedIn) {
         statusEl.textContent = 'مسجل دخول Instagram ✓';
         if (loginBtn) loginBtn.textContent = 'إعادة تسجيل دخول';
+        if (logoutBtn) logoutBtn.style.display = '';
+      } else if (cookiesFile) {
+        statusEl.textContent = 'كوكيز مستوردة ✓ — جاهز للبحث';
+        if (loginBtn) loginBtn.textContent = 'تسجيل دخول Instagram';
         if (logoutBtn) logoutBtn.style.display = '';
       } else {
         statusEl.textContent = 'مش مسجل دخول';
@@ -1827,10 +1831,14 @@
     const logoutBtn = document.getElementById('fb-logout-btn');
     if (!statusEl) return;
     try {
-      const { loggedIn } = await window.electronAPI.facebook.status();
+      const { loggedIn, cookiesFile } = await window.electronAPI.facebook.status();
       if (loggedIn) {
         statusEl.textContent = 'مسجل دخول Facebook ✓';
         if (loginBtn) loginBtn.textContent = 'إعادة تسجيل دخول';
+        if (logoutBtn) logoutBtn.style.display = '';
+      } else if (cookiesFile) {
+        statusEl.textContent = 'كوكيز مستوردة ✓ — جاهز للبحث';
+        if (loginBtn) loginBtn.textContent = 'تسجيل دخول Facebook';
         if (logoutBtn) logoutBtn.style.display = '';
       } else {
         statusEl.textContent = 'مش مسجل دخول';
@@ -1838,6 +1846,34 @@
         if (logoutBtn) logoutBtn.style.display = 'none';
       }
     } catch (e) { /* ignore */ }
+  }
+
+  function bindCookieImportButtons() {
+    function wireImport(btnId, platform, onDone) {
+      const btn = document.getElementById(btnId);
+      if (!btn || !window.electronAPI?.cookies) return;
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = '...';
+        try {
+          const r = await window.electronAPI.cookies.import(platform);
+          if (r?.success) {
+            toast('تم استيراد الكوكيز ✓', 'success');
+            if (onDone) onDone();
+          } else if (!r?.cancelled) {
+            toast(r?.error || 'فشل الاستيراد', 'error');
+          }
+        } catch (e) {
+          toast(e?.message || 'فشل الاستيراد', 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      });
+    }
+    wireImport('ig-import-btn', 'instagram', refreshInstagramLoginStatus);
+    wireImport('fb-import-btn', 'facebook', refreshFacebookLoginStatus);
   }
 
   function bindFacebookLoginButtons() {
@@ -2487,6 +2523,7 @@
     initEvents();
     bindInstagramLoginButtons();
     bindFacebookLoginButtons();
+    bindCookieImportButtons();
     bindLicenseAndYtdlpButtons();
     switchPlatform('tiktok');
 
