@@ -443,8 +443,8 @@
     showLoading(true);
     try {
       const payload = { query, platform: state.platform };
-      // Instagram: detect mode from prefix. @user → account, otherwise hashtag.
-      if (state.platform === 'instagram') {
+      // Instagram + Facebook: detect mode from prefix. @user → account, otherwise hashtag.
+      if (state.platform === 'instagram' || state.platform === 'facebook') {
         const trimmed = query.trim();
         payload.mode = trimmed.startsWith('@') ? 'account' : 'hashtag';
         payload.query = trimmed.replace(/^[@#]/, '');
@@ -1680,6 +1680,7 @@
         tiktok: 'ابحث على TikTok…',
         youtube: 'ابحث على YouTube…',
         instagram: 'ابحث: hashtag (مثلاً: عطور) أو @حساب',
+        facebook: 'ابحث: hashtag (مثلاً: عطور) أو @صفحة',
       };
       dom.searchInput.placeholder = placeholders[platform] || 'Search for videos...';
     }
@@ -1690,6 +1691,13 @@
       const showBanner = platform === 'instagram' && !!window.electronAPI?.instagram;
       igBanner.style.display = showBanner ? 'flex' : 'none';
       if (showBanner) refreshInstagramLoginStatus();
+    }
+    // Show/hide Facebook login banner.
+    const fbBanner = document.getElementById('fb-login-banner');
+    if (fbBanner) {
+      const showBanner = platform === 'facebook' && !!window.electronAPI?.facebook;
+      fbBanner.style.display = showBanner ? 'flex' : 'none';
+      if (showBanner) refreshFacebookLoginStatus();
     }
 
     // Hide results that belong to a different platform.
@@ -1808,6 +1816,57 @@
         }
         updBtn.disabled = false;
         updBtn.textContent = 'تحديث yt-dlp';
+      });
+    }
+  }
+
+  async function refreshFacebookLoginStatus() {
+    if (!window.electronAPI?.facebook) return;
+    const statusEl = document.getElementById('fb-login-status');
+    const loginBtn = document.getElementById('fb-login-btn');
+    const logoutBtn = document.getElementById('fb-logout-btn');
+    if (!statusEl) return;
+    try {
+      const { loggedIn } = await window.electronAPI.facebook.status();
+      if (loggedIn) {
+        statusEl.textContent = 'مسجل دخول Facebook ✓';
+        if (loginBtn) loginBtn.textContent = 'إعادة تسجيل دخول';
+        if (logoutBtn) logoutBtn.style.display = '';
+      } else {
+        statusEl.textContent = 'مش مسجل دخول';
+        if (loginBtn) loginBtn.textContent = 'تسجيل دخول Facebook';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function bindFacebookLoginButtons() {
+    const loginBtn = document.getElementById('fb-login-btn');
+    const logoutBtn = document.getElementById('fb-logout-btn');
+    if (loginBtn) {
+      loginBtn.addEventListener('click', async () => {
+        if (!window.electronAPI?.facebook) return;
+        loginBtn.disabled = true;
+        loginBtn.textContent = 'جاري الفتح...';
+        try {
+          const res = await window.electronAPI.facebook.login();
+          if (res?.success) toast('تم تسجيل الدخول بنجاح', 'success');
+          else toast('لم يتم تسجيل الدخول', 'warning');
+        } catch (e) {
+          toast(e?.message || 'خطأ في فتح نافذة تسجيل الدخول', 'error');
+        } finally {
+          loginBtn.disabled = false;
+          refreshFacebookLoginStatus();
+        }
+      });
+    }
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', async () => {
+        if (!window.electronAPI?.facebook) return;
+        if (!confirm('تسجيل خروج Facebook؟')) return;
+        await window.electronAPI.facebook.logout();
+        toast('تم تسجيل الخروج', 'info');
+        refreshFacebookLoginStatus();
       });
     }
   }
@@ -2427,6 +2486,7 @@
     initSocket();
     initEvents();
     bindInstagramLoginButtons();
+    bindFacebookLoginButtons();
     bindLicenseAndYtdlpButtons();
     switchPlatform('tiktok');
 

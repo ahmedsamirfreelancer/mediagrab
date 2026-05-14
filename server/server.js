@@ -120,6 +120,14 @@ function isInstagramUrl(u) {
   } catch { return false; }
 }
 
+function isFacebookUrl(u) {
+  if (typeof u !== 'string') return false;
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    return /(^|\.)(facebook\.com|fb\.watch|fb\.com)$/i.test(h);
+  } catch { return false; }
+}
+
 function buildInstagramUrl(input, mode) {
   const raw = String(input || '').trim();
   if (!raw) return null;
@@ -131,18 +139,38 @@ function buildInstagramUrl(input, mode) {
   return null;
 }
 
+function buildFacebookUrl(input, mode) {
+  const raw = String(input || '').trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const slug = raw.replace(/^[@#\s]+/, '').replace(/\s+/g, '');
+  if (!slug) return null;
+  // Hashtag → public hashtag page (often returns posts; yt-dlp pulls embedded videos)
+  if (mode === 'hashtag') return `https://www.facebook.com/hashtag/${encodeURIComponent(slug)}`;
+  // Account → page's videos tab (works for public pages without login)
+  if (mode === 'account' || mode === 'username') return `https://www.facebook.com/${encodeURIComponent(slug)}/videos`;
+  return null;
+}
+
 function ytdlpExtraArgsForUrl(targetUrl) {
   const extra = [];
+  const dataDir = process.env.MEDIAGRAB_DATA_DIR || path.join(__dirname, 'data');
   if (isInstagramUrl(targetUrl)) {
     // Prefer the cookies file written by the in-app Instagram login flow.
     // Falls back to scraping the user's installed browser only if that file
     // doesn't exist (e.g. fresh install before first login).
-    const dataDir = process.env.MEDIAGRAB_DATA_DIR || path.join(__dirname, 'data');
     const cookiesFile = path.join(dataDir, 'instagram-cookies.txt');
     if (fs.existsSync(cookiesFile)) {
       extra.push('--cookies', cookiesFile);
     } else {
       extra.push('--cookies-from-browser', INSTAGRAM_BROWSER);
+    }
+  } else if (isFacebookUrl(targetUrl)) {
+    const cookiesFile = path.join(dataDir, 'facebook-cookies.txt');
+    if (fs.existsSync(cookiesFile)) {
+      extra.push('--cookies', cookiesFile);
+    } else {
+      extra.push('--cookies-from-browser', INSTAGRAM_BROWSER); // same browser var
     }
   }
   return extra;
@@ -1289,6 +1317,42 @@ app.post('/api/search', async (req, res) => {
         return res.status(needsLogin ? 401 : 500).json({
           error: needsLogin
             ? 'متعرفش يقرأ كوكيز Instagram من Chrome. اقفل Chrome تماماً وجرب تاني (لازم تكون مسجل دخول Instagram على Chrome).'
+            : msg,
+          raw: msg,
+        });
+      }
+    }
+
+    if (plat === 'facebook') {
+      // Facebook works the same way as Instagram: hashtag page or account
+      // page (videos tab), then yt-dlp pulls the listing using saved cookies.
+      const fbMode = (mode || 'hashtag').toLowerCase();
+      const fbUrl = buildFacebookUrl(query, fbMode);
+      if (!fbUrl) return res.status(400).json({ error: 'Invalid Facebook input' });
+      try {
+        const info = await ytdlpInfo(fbUrl, true, { playlistEnd: safeCount });
+        const list = Array.isArray(info) ? info : [info];
+        return res.json({
+          platform: 'facebook',
+          mode: fbMode,
+          sourceUrl: fbUrl,
+          results: list.map((v) => ({
+            id: v.id,
+            title: v.title || v.description || `Video ${v.id}`,
+            url: v.url || v.webpage_url || '',
+            duration: v.duration,
+            thumbnail: v.thumbnail || v.thumbnails?.[0]?.url || '',
+            uploader: v.uploader || v.channel || v.uploader_id || '',
+            author: v.uploader || v.channel || v.uploader_id || '',
+            playCount: v.view_count || 0,
+          })),
+        });
+      } catch (e) {
+        const msg = String(e?.message || e);
+        const needsLogin = /login|cookies?|private|429|rate|HTTP Error 4\d\d/i.test(msg);
+        return res.status(needsLogin ? 401 : 500).json({
+          error: needsLogin
+            ? 'محتاج تسجيل دخول Facebook. اضغط زرار تسجيل الدخول فوق وادخل بحسابك.'
             : msg,
           raw: msg,
         });

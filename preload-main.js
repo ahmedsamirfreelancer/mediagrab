@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     login: () => ipcRenderer.invoke('instagram:login'),
     logout: () => ipcRenderer.invoke('instagram:logout'),
   },
+  // Facebook in-app login (same pattern as Instagram)
+  facebook: {
+    status: () => ipcRenderer.invoke('facebook:status'),
+    login: () => ipcRenderer.invoke('facebook:login'),
+    logout: () => ipcRenderer.invoke('facebook:logout'),
+  },
   // License info (read-only; activation happens at the gate before this window opens)
   license: {
     getStatus: () => ipcRenderer.invoke('license:getStatus'),
