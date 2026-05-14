@@ -1618,17 +1618,25 @@ app.post('/api/open-folder', (req, res) => {
     return res.status(400).json({ error: 'filePath required' });
   }
   try {
-    const target = fs.existsSync(filePath) ? filePath : path.dirname(filePath);
+    const fileExists = fs.existsSync(filePath);
+    const folder = fileExists ? path.dirname(filePath) : (fs.existsSync(path.dirname(filePath)) ? path.dirname(filePath) : null);
+    if (!folder) {
+      return res.status(404).json({ error: 'الملف أو المجلد غير موجود' });
+    }
+
     if (process.platform === 'win32') {
-      if (fs.existsSync(filePath)) {
-        spawn('explorer', ['/select,', filePath], { detached: true, stdio: 'ignore' }).unref();
-      } else {
-        spawn('explorer', [target], { detached: true, stdio: 'ignore' }).unref();
-      }
+      // explorer.exe wants `/select,"C:\path\to\file"` as a SINGLE arg, not
+      // two separate args. Using `shell: true` lets us pass the whole
+      // command string so quoting + Arabic paths work correctly.
+      const target = fileExists ? filePath : folder;
+      const cmd = fileExists
+        ? `explorer.exe /select,"${target}"`
+        : `explorer.exe "${target}"`;
+      spawn(cmd, { shell: true, detached: true, stdio: 'ignore', windowsHide: true }).unref();
     } else if (process.platform === 'darwin') {
-      spawn('open', [path.dirname(filePath)], { detached: true, stdio: 'ignore' }).unref();
+      spawn('open', [folder], { detached: true, stdio: 'ignore' }).unref();
     } else {
-      spawn('xdg-open', [path.dirname(filePath)], { detached: true, stdio: 'ignore' }).unref();
+      spawn('xdg-open', [folder], { detached: true, stdio: 'ignore' }).unref();
     }
     res.json({ success: true });
   } catch (err) {
