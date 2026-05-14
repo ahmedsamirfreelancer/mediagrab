@@ -577,6 +577,28 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
   });
 }
 
+// Extract MP3 audio from a downloaded video using bundled ffmpeg. Used by the
+// TikTok 🎵 button — TikWM gives us video URLs only, so the actual conversion
+// has to happen client-side after download.
+function extractAudioToMp3(srcVideoPath, destMp3Path) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffmpeg', [
+      '-y', '-i', srcVideoPath,
+      '-vn',                 // drop video stream
+      '-acodec', 'libmp3lame',
+      '-q:a', '2',           // VBR ~190kbps, good quality
+      destMp3Path,
+    ], { windowsHide: true });
+    let stderrBuf = '';
+    proc.stderr.on('data', (d) => { stderrBuf += d.toString(); });
+    proc.on('close', (code) => {
+      if (code === 0) resolve(destMp3Path);
+      else reject(new Error(`ffmpeg exited ${code}: ${stderrBuf.slice(-400)}`));
+    });
+    proc.on('error', (err) => reject(new Error(`ffmpeg spawn failed: ${err.message}`)));
+  });
+}
+
 function parseYtdlpProgress(line) {
   const match = line.match(
     /\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\S+)\s+at\s+([\d.]+\S+\/s)\s+ETA\s+(\S+)/
@@ -1060,10 +1082,30 @@ async function runDownloadOnce(task, entry, ctx) {
     }
     const videoUrl = task.hdDownloadUrl || task.downloadUrl;
     if (!videoUrl) throw new Error('فشل الحصول على رابط التحميل من TikWM');
-    // uniquePath protects against filename collisions when titles repeat
-    // (very common for TikTok search results with near-identical titles).
-    // Cross-session dedupe by video ID still runs above — this only affects
-    // brand-new downloads to a folder that already has a same-named file.
+
+    // Skip-if-exists: filenames are now unique per video (title-derived), so
+    // a same-named file in the target folder really IS this video. Either the
+    // user already downloaded it earlier, or — for audio mode — already
+    // extracted the MP3. Either way, no need to re-download.
+    const expectedExt = quality === 'audio' ? '.mp3' : '.mp4';
+    const expectedPath = path.join(taskOutputDir, filenameBase + expectedExt);
+    if (skipExisting && fs.existsSync(expectedPath)) {
+      emitProgress(task.id, {
+        title: task.title, progress: 100, speed: '',
+        status: 'completed', filePath: expectedPath, skipped: true,
+      });
+      pushCompleted({
+        id: task.id, title: task.title, platform: plat,
+        filePath: expectedPath, completedAt: new Date().toISOString(),
+        skipped: true,
+      });
+      recordDownloaded(plat, extractVideoId(task), expectedPath);
+      activeDownloads.delete(task.id);
+      return;
+    }
+
+    // uniquePath stays as a final guard against rare title collisions
+    // between two genuinely different videos.
     const destBase = uniquePath(path.join(taskOutputDir, filenameBase + '.mp4'));
     try {
       filePath = await downloadFile(videoUrl, destBase, task.id, task.title);
@@ -1072,6 +1114,16 @@ async function runDownloadOnce(task, entry, ctx) {
       const freshInfo = await tikwmGetVideo(task.url);
       if (!freshInfo || (!freshInfo.play && !freshInfo.hdplay)) throw dlErr;
       filePath = await downloadFile(freshInfo.hdplay || freshInfo.play, destBase, task.id, task.title);
+    }
+
+    // Audio-only mode: TikWM gives us video; convert to MP3 with ffmpeg and
+    // discard the source .mp4 so the user gets exactly what the 🎵 button promised.
+    if (quality === 'audio') {
+      const mp3Path = uniquePath(filePath.replace(/\.mp4$/i, '.mp3'));
+      emitProgress(task.id, { title: task.title, progress: 99, speed: '', status: 'downloading', eta: 'converting' });
+      await extractAudioToMp3(filePath, mp3Path);
+      try { fs.unlinkSync(filePath); } catch {}
+      filePath = mp3Path;
     }
   } else {
     filePath = await ytdlpDownload(task.url, taskOutputDir, task.id, task.title, quality, filenameBase, {
