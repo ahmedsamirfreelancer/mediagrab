@@ -3,6 +3,12 @@ const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
 
+// Force the same userData folder in dev (`npm start`) and packaged builds.
+// Without this, dev runs land in %APPDATA%/mediagrab (lowercase name from
+// package.json) while the installer uses %APPDATA%/MediaGrab (productName),
+// so dev mode wouldn't see the license/cookies the user already activated.
+app.setName('MediaGrab');
+
 let serverProcess = null;
 let mainWin = null;
 let activationWin = null;
