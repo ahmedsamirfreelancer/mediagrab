@@ -20,6 +20,11 @@
       search: '',
     },
     view: 'grid', // 'grid' | 'list'
+    pagination: {
+      page: 1,
+      // 0 = show all on one page
+      size: parseInt(localStorage.getItem('mediagrab_page_size'), 10) || 50,
+    },
     context: null, // { name, type: 'channel' | 'search' | 'single' }
     downloadedIds: { tiktok: new Set(), youtube: new Set(), instagram: new Set(), facebook: new Set() },
     settings: {
@@ -53,9 +58,13 @@
     searchInput: $('#search-input'),
     searchBtn: $('#search-btn'),
     searchSection: $('#search-section'),
+    countBtn: $('#count-btn'),
+    countResult: $('#count-result'),
     resultsSection: $('#results-section'),
     resultsGrid: $('#results-grid'),
     resultCount: $('#result-count'),
+    paginationTop: $('#pagination-top'),
+    paginationBottom: $('#pagination-bottom'),
     statsBar: $('#stats-bar'),
     sortBy: $('#sort-by'),
     filterDuration: $('#filter-duration'),
@@ -197,10 +206,17 @@
         status: 'downloading',
         downloaded: data.downloaded, total: data.total,
       });
+      const card = state.cardByQueueId?.get(data.id);
+      if (card) setCardDownloadState(card, 'downloading', data.progress || 0, data.speed);
     });
 
     socket.on('download:complete', (data) => {
       updateQueueItem(data.id, { progress: 100, status: 'completed', filePath: data.filePath });
+      const card = state.cardByQueueId?.get(data.id);
+      if (card) {
+        setCardDownloadState(card, 'completed', 100, '', { filePath: data.filePath, skipped: data.skipped });
+        state.cardByQueueId.delete(data.id);
+      }
       const msg = data.dedupe
         ? `سبق تنزيله: ${truncate(data.title || 'Video', 45)}`
         : data.skipped
@@ -222,6 +238,11 @@
       updateQueueItem(data.id, { status: 'error', error: data.error });
       toast(`فشل: ${truncate(data.error || 'خطأ غير معروف', 80)}`, 'error');
       onTaskFinished(data.id, 'error');
+      const card = state.cardByQueueId?.get(data.id);
+      if (card) {
+        setCardDownloadState(card, 'error', 0, '', { error: data.error });
+        state.cardByQueueId.delete(data.id);
+      }
     });
 
     socket.on('download:queued', (data) => {
@@ -240,23 +261,28 @@
     });
 
     // Streaming listing events
+    let _streamRenderPending = false;
     socket.on('listing:item', (data) => {
       if (currentStreamSession && data.session !== currentStreamSession) return;
       const item = normalizeItem(data.item);
       state.results.push(item);
-      // Re-render incrementally — apply current filters/sort.
       dom.resultsSection.classList.remove('hidden');
-      applyFiltersAndSort();
-      const totalShown = state.filteredResults.length;
-      const totalAll = state.results.length;
-      dom.resultCount.textContent = totalShown === totalAll
-        ? `${totalAll} عنصر (يتم الجلب…)`
-        : `${totalShown} من ${totalAll} (يتم الجلب…)`;
-      // Append only the new card if it passes filters
-      const idx = state.filteredResults.indexOf(item);
-      if (idx >= 0) dom.resultsGrid.appendChild(createVideoCard(item, idx));
-      renderStats();
-      updateSelectionUI();
+
+      // Throttle full re-renders to keep things smooth during fast streams.
+      // The current page is re-rendered (so new items appear if they fall on
+      // this page, and pagination updates).
+      if (!_streamRenderPending) {
+        _streamRenderPending = true;
+        requestAnimationFrame(() => {
+          _streamRenderPending = false;
+          renderResults();
+          const totalShown = state.filteredResults.length;
+          const totalAll = state.results.length;
+          dom.resultCount.textContent = totalShown === totalAll
+            ? `${totalAll} عنصر (يتم الجلب…)`
+            : `${totalShown} من ${totalAll} (يتم الجلب…)`;
+        });
+      }
     });
 
     socket.on('listing:complete', (data) => {
@@ -308,12 +334,52 @@
     }
   }
 
+  // Convert any tiktokcdn / cdninstagram / fbcdn URL into a proxied one so
+  // the browser doesn't send Referer: http://localhost:3456 (which the CDN
+  // rejects with 403).
+  function proxyMedia(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (/tiktokcdn|tiktokv|muscdn|byteoversea|ttwstatic|cdninstagram|fbcdn/i.test(url)) {
+      return '/api/proxy/media?u=' + encodeURIComponent(url);
+    }
+    return url;
+  }
+
+  // Thumbnail retry — TikTok CDN occasionally rate-limits a request the
+  // first time, especially after a tab switch. Up to 3 retries with backoff.
+  window.thumbRetry = function (img) {
+    const tries = parseInt(img.dataset.retry || '0', 10) + 1;
+    img.dataset.retry = tries;
+    if (tries > 3) { img.style.display = 'none'; return; }
+    const base = img.dataset.thumb;
+    if (!base) { img.style.display = 'none'; return; }
+    const sep = base.includes('?') ? '&' : '?';
+    setTimeout(() => { img.src = base + sep + 'r=' + tries + '_' + Date.now(); }, 400 * tries);
+  };
+
+  // After a tab switch back, re-prompt the lazy loader to fetch images that
+  // are currently in view but never loaded — IntersectionObserver doesn't
+  // always re-fire on visibility change.
+  function nudgeVisibleThumbnails() {
+    if (!dom.resultsGrid) return;
+    const imgs = dom.resultsGrid.querySelectorAll('img[data-thumb]');
+    imgs.forEach((img) => {
+      if (!img.complete || img.naturalWidth === 0) {
+        // Force a fresh load
+        const src = img.dataset.thumb;
+        if (src) img.src = src + (src.includes('?') ? '&' : '?') + 'n=' + Date.now();
+      }
+    });
+  }
+
+  
   let currentStreamSession = null;
 
   async function fetchInfoStreaming(url) {
     showLoading(true);
     state.results = [];
     state.selected.clear();
+    state.pagination.page = 1;
     renderResults();
 
     try {
@@ -331,15 +397,27 @@
   // Single-item download (URL input or single card).
   // Always use a fresh queue ID so re-clicking the same card creates a new
   // queue entry instead of overwriting the previous one.
-  async function startDownload(url, info) {
+  // Map queue-id → originating card element, so socket progress events can
+  // update the card the user clicked.
+  if (!state.cardByQueueId) state.cardByQueueId = new Map();
+
+  async function startDownload(url, info, sourceCard) {
     if (!isValidUrl(url)) return toast('رابط غير صالح', 'warning');
     const id = generateId();
-    addQueueItem({
-      id,
-      title: info?.title || url,
-      thumbnail: info?.thumbnail || '',
-      url, status: 'queued', progress: 0,
-    });
+    if (sourceCard) {
+      state.cardByQueueId.set(id, sourceCard);
+      setCardDownloadState(sourceCard, 'queued', 0);
+    } else {
+      // Only show in the bottom Queue panel when there's no originating card
+      // (e.g. paste-URL → Download button). Card-initiated downloads have
+      // their own per-card progress UI, so duplicating them would be noise.
+      addQueueItem({
+        id,
+        title: info?.title || url,
+        thumbnail: info?.thumbnail || '',
+        url, status: 'queued', progress: 0,
+      });
+    }
     try {
       await apiCall('/download', {
         url, platform: state.platform, id,
@@ -441,16 +519,41 @@
 
   async function searchVideos(query) {
     showLoading(true);
+    state.pagination.page = 1;
     try {
-      // Default to 200 results (server caps at 500). 30 was way too few for
-      // discovery-style searches where the user wants to filter/sort after.
-      const payload = { query, platform: state.platform, count: 200 };
+      // count: 0 → unlimited. Server keeps paginating each platform's source
+      // until it's exhausted (TikWM cursor end, yt-dlp playlist end, etc.).
+      const payload = { query, platform: state.platform, count: 0 };
       // Instagram + Facebook: detect mode from prefix. @user → account, otherwise hashtag.
       if (state.platform === 'instagram' || state.platform === 'facebook') {
         const trimmed = query.trim();
         payload.mode = trimmed.startsWith('@') ? 'account' : 'hashtag';
         payload.query = trimmed.replace(/^[@#]/, '');
       }
+
+      // Instagram keyword search: Instagram's API endpoints reject programmatic
+      // calls even with valid cookies ("Oops, an error occurred"), so load the
+      // real search page in a hidden Electron window and scrape the DOM. To
+      // Instagram this looks indistinguishable from a real user scrolling.
+      if (state.platform === 'instagram' && payload.mode === 'hashtag' && window.electronAPI?.instagram?.searchViaPage) {
+        toast('بيفتح Instagram في الخلفية ويـscrape النتائج...', 'info');
+        const r = await window.electronAPI.instagram.searchViaPage(payload.query);
+        if (!r?.success) throw new Error(r?.error || 'فشل البحث');
+        const sliced = payload.count > 0 ? (r.results || []).slice(0, payload.count) : (r.results || []);
+        const results = sliced.map((item) => ({
+          id: item.id,
+          title: item.alt || `${item.kind === 'reel' ? 'Reel' : 'Post'} ${item.id}`,
+          url: item.url,
+          thumbnail: item.thumbnail,
+          uploader: '',
+          author: '',
+          playCount: 0,
+          platform: 'instagram',
+        }));
+        handleSearchResult({ platform: 'instagram', mode: 'page-scrape', results });
+        return;
+      }
+
       const data = await apiCall('/search', payload);
       handleSearchResult(data);
     } catch (err) {
@@ -458,6 +561,82 @@
     } finally {
       showLoading(false);
     }
+  }
+
+  // Reels keyword search using Electron's network stack. Tries fbsearch/clips
+  // first, then topsearch → tag sections as fallbacks.
+  async function instagramReelsSearchViaElectron(keyword, count) {
+    const q = encodeURIComponent(keyword);
+    const slug = keyword.replace(/\s+/g, '').toLowerCase();
+    const endpoints = [
+      // 1. Stable old web search (returns hashtags/users mix — we follow up
+      //    on the top hashtag to fetch its reels)
+      `https://www.instagram.com/web/search/topsearch/?context=blended&query=${q}`,
+      // 2. Reels-focused mobile API
+      `https://www.instagram.com/api/v1/fbsearch/clips/?query=${q}`,
+      `https://www.instagram.com/api/v1/fbsearch/topsearch/?query=${q}&context=blended`,
+      // 3. Tag-content direct (if query maps cleanly to a hashtag)
+      `https://www.instagram.com/api/v1/tags/web_info/?tag_name=${encodeURIComponent(slug)}`,
+      `https://i.instagram.com/api/v1/tags/${encodeURIComponent(slug)}/sections/`,
+    ];
+    const fetch1 = window.electronAPI.instagram.apiFetch;
+    let lastErr = '';
+    for (const url of endpoints) {
+      const r = await fetch1(url);
+      if (!r?.success) { lastErr = r?.error || 'fetch failed'; continue; }
+      const d = r.data || {};
+      const clips = [];
+      // fbsearch/clips
+      for (const mod of d.clips_serp_modules || []) {
+        for (const c of mod.clips || []) if (c.media) clips.push(c.media);
+      }
+      // topsearch — if it returns a hashtag, follow up with its sections
+      if (!clips.length && d.hashtags?.length) {
+        const top = d.hashtags[0]?.hashtag?.name;
+        if (top) {
+          const r2 = await fetch1(`https://i.instagram.com/api/v1/tags/${encodeURIComponent(top)}/sections/`);
+          if (r2?.success) {
+            for (const sec of r2.data?.sections || []) {
+              for (const m of sec.layout_content?.medias || []) if (m.media) clips.push(m.media);
+            }
+          }
+        }
+      }
+      // tag sections (direct or web_info)
+      const tagRoot = d.data || d;
+      for (const sec of tagRoot.sections || []) {
+        for (const m of sec.layout_content?.medias || []) if (m.media) clips.push(m.media);
+      }
+      for (const bucket of ['recent', 'top']) {
+        for (const sec of tagRoot[bucket]?.sections || []) {
+          for (const m of sec.layout_content?.medias || []) if (m.media) clips.push(m.media);
+        }
+      }
+      if (clips.length) {
+        return {
+          platform: 'instagram',
+          mode: 'reels-search',
+          results: clips.slice(0, count).map((m) => {
+            const owner = m.owner || m.user || {};
+            const shortcode = m.code || m.shortcode || m.pk || m.id;
+            const videoVer = (m.video_versions && m.video_versions[0]) || {};
+            return {
+              id: m.pk || m.id || shortcode,
+              title: m.caption?.text?.substring(0, 200) || `Reel ${shortcode}`,
+              url: shortcode ? `https://www.instagram.com/reel/${shortcode}/` : '',
+              duration: Math.round(m.video_duration || 0),
+              thumbnail: (m.image_versions2?.candidates?.[0]?.url) || m.thumbnail_url || '',
+              uploader: owner.username || '',
+              author: owner.full_name || owner.username || '',
+              playCount: m.play_count || m.view_count || 0,
+              platform: 'instagram',
+              downloadUrl: videoVer.url || null,
+            };
+          }),
+        };
+      }
+    }
+    throw new Error('Instagram رفض كل الـ endpoints: ' + lastErr.slice(0, 100));
   }
 
   async function cancelDownload(id) {
@@ -481,6 +660,7 @@
 
     state.results = items.map(normalizeItem);
     state.selected.clear();
+    state.pagination.page = 1;
     // Track context so downloads land in a folder named after the channel/playlist.
     state.context = inferContextFromUrl(dom.urlInput.value.trim(), data.type, items);
     renderResults();
@@ -493,10 +673,33 @@
   }
 
   function handleSearchResult(data) {
-    const items = data.results || data.videos || [];
-    if (!items.length) return toast('لا توجد نتائج بحث', 'warning');
+    const rawItems = data.results || data.videos || [];
+    if (!rawItems.length) return toast('لا توجد نتائج بحث', 'warning');
+    // De-dupe by id — paginated TikTok cursors can overlap and Instagram's
+    // grid sometimes renders the same reel in the "trending" + "regular"
+    // sections, so both paths can leak duplicates into the result list.
+    const seen = new Set();
+    const items = [];
+    for (const it of rawItems) {
+      const key = String(it.id ?? it.url ?? '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      items.push(it);
+    }
+    // Ignore late responses from a prior platform — by the time this fired
+    // the user may have switched tabs and started another search.
+    const respPlatform = data.platform || state.platform;
+    if (respPlatform !== state.platform) {
+      // Stash the results in case the user switches back to that platform.
+      if (!state.resultsByPlatform) state.resultsByPlatform = {};
+      state.resultsByPlatform[respPlatform] = items.map(normalizeItem);
+      return;
+    }
     state.results = items.map(normalizeItem);
+    if (!state.resultsByPlatform) state.resultsByPlatform = {};
+    state.resultsByPlatform[state.platform] = state.results;
     state.selected.clear();
+    state.pagination.page = 1;
     state.context = {
       type: 'search',
       name: 'بحث-' + (dom.searchInput.value.trim() || 'unknown') + '-' + state.platform,
@@ -761,17 +964,154 @@
     dom.resultsSection.classList.remove('hidden');
     const totalShown = state.filteredResults.length;
     const totalAll = state.results.length;
+
+    // Clamp current page after filter/sort changes
+    const totalPages = pageCount();
+    if (state.pagination.page > totalPages) state.pagination.page = totalPages || 1;
+
+    const { from, to } = pageBounds();
+    const slice = state.filteredResults.slice(from, to);
+
     dom.resultCount.textContent = totalShown === totalAll
       ? `${totalAll} عنصر`
       : `${totalShown} من ${totalAll}`;
+
     dom.resultsGrid.innerHTML = '';
     dom.resultsGrid.classList.toggle('list-view', state.view === 'list');
-    state.filteredResults.forEach((item, index) => {
-      dom.resultsGrid.appendChild(createVideoCard(item, index));
+    slice.forEach((item, i) => {
+      // pass the absolute index in filteredResults so selection mapping stays valid
+      dom.resultsGrid.appendChild(createVideoCard(item, from + i));
     });
+
+    renderPagination();
     renderStats();
     updateFolderUI();
     updateSelectionUI();
+  }
+
+  function pageCount() {
+    const size = state.pagination.size;
+    const total = state.filteredResults.length;
+    if (!size || size <= 0) return 1; // all-on-one-page
+    return Math.max(1, Math.ceil(total / size));
+  }
+
+  function pageBounds() {
+    const size = state.pagination.size;
+    const total = state.filteredResults.length;
+    if (!size || size <= 0) return { from: 0, to: total };
+    const page = state.pagination.page;
+    const from = (page - 1) * size;
+    const to = Math.min(from + size, total);
+    return { from, to };
+  }
+
+  function goToPage(p) {
+    const total = pageCount();
+    state.pagination.page = Math.max(1, Math.min(total, p));
+    renderResults();
+    // Scroll to top of results when paginating
+    try { dom.resultsSection?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+  }
+
+  function setPageSize(sizeStr) {
+    const size = sizeStr === 'all' ? 0 : Math.max(1, parseInt(sizeStr, 10) || 50);
+    state.pagination.size = size;
+    state.pagination.page = 1;
+    try { localStorage.setItem('mediagrab_page_size', String(size)); } catch {}
+    renderResults();
+  }
+
+  function renderPagination() {
+    const renderInto = (container, includeSizePicker) => {
+      if (!container) return;
+      container.innerHTML = '';
+      const total = state.filteredResults.length;
+      const size = state.pagination.size;
+      const pages = pageCount();
+      const page = state.pagination.page;
+
+      // Hide entirely if no items
+      if (total === 0) return;
+
+      // Page buttons (windowed: first, last, current ± 2, ellipses)
+      const wantPages = pages > 1;
+      if (wantPages) {
+        const mkBtn = (label, p, opts = {}) => {
+          const b = document.createElement('button');
+          b.className = 'pg-btn' + (opts.active ? ' active' : '');
+          b.textContent = label;
+          if (opts.disabled) b.disabled = true;
+          else b.addEventListener('click', () => goToPage(p));
+          return b;
+        };
+        const mkEllipsis = () => {
+          const s = document.createElement('span');
+          s.className = 'pg-ellipsis';
+          s.textContent = '…';
+          return s;
+        };
+
+        container.appendChild(mkBtn('«', 1, { disabled: page === 1 }));
+        container.appendChild(mkBtn('‹', page - 1, { disabled: page === 1 }));
+
+        const window2 = 2;
+        const pageNums = new Set([1, pages, page]);
+        for (let d = 1; d <= window2; d++) {
+          if (page - d >= 1) pageNums.add(page - d);
+          if (page + d <= pages) pageNums.add(page + d);
+        }
+        const sorted = [...pageNums].sort((a, b) => a - b);
+        let prev = 0;
+        for (const n of sorted) {
+          if (prev && n - prev > 1) container.appendChild(mkEllipsis());
+          container.appendChild(mkBtn(String(n), n, { active: n === page }));
+          prev = n;
+        }
+
+        container.appendChild(mkBtn('›', page + 1, { disabled: page === pages }));
+        container.appendChild(mkBtn('»', pages, { disabled: page === pages }));
+      }
+
+      // Info text
+      const info = document.createElement('span');
+      info.className = 'pg-info';
+      if (!size) {
+        info.textContent = `الكل (${total})`;
+      } else {
+        const { from, to } = pageBounds();
+        info.textContent = `${from + 1}–${to} من ${total}`;
+      }
+      container.appendChild(info);
+
+      // Page-size selector (only on the top bar to avoid duplication)
+      if (includeSizePicker) {
+        const label = document.createElement('span');
+        label.className = 'pg-size-label';
+        label.textContent = 'لكل صفحة:';
+        const sel = document.createElement('select');
+        sel.className = 'pg-size';
+        const opts = [25, 50, 100, 200, 500];
+        for (const v of opts) {
+          const o = document.createElement('option');
+          o.value = String(v);
+          o.textContent = String(v);
+          if (v === size) o.selected = true;
+          sel.appendChild(o);
+        }
+        const allOpt = document.createElement('option');
+        allOpt.value = 'all';
+        allOpt.textContent = 'الكل';
+        if (!size) allOpt.selected = true;
+        sel.appendChild(allOpt);
+        sel.addEventListener('change', (e) => setPageSize(e.target.value));
+        container.appendChild(label);
+        container.appendChild(sel);
+      }
+    };
+
+    renderInto(dom.paginationTop, true);
+    renderInto(dom.paginationBottom, false);
   }
 
   // Suggest a subfolder name based on context, but only when the user hasn't
@@ -803,6 +1143,62 @@
     if (state.results.length) renderResults();
   }
 
+  // Visually reflects download state on the originating result card.
+  // status: 'queued' | 'downloading' | 'completed' | 'error'
+  function setCardDownloadState(card, status, progress = 0, speed = '', extra = {}) {
+    if (!card) return;
+    card.classList.remove('dl-queued', 'dl-downloading', 'dl-completed', 'dl-error');
+    card.classList.add('dl-' + status);
+
+    let overlay = card.querySelector('.card-dl-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'card-dl-overlay';
+      overlay.innerHTML = `
+        <div class="card-dl-label"></div>
+        <div class="card-dl-bar"><div class="card-dl-bar-fill"></div></div>
+      `;
+      const thumb = card.querySelector('.card-thumbnail');
+      (thumb || card).appendChild(overlay);
+    }
+    const label = overlay.querySelector('.card-dl-label');
+    const fill = overlay.querySelector('.card-dl-bar-fill');
+    const dlBtn = card.querySelector('.card-dl-btn');
+
+    if (status === 'queued') {
+      label.textContent = 'في الطابور...';
+      fill.style.width = '0%';
+      if (dlBtn) { dlBtn.disabled = true; dlBtn.innerHTML = '⏳ بنحضّر'; }
+    } else if (status === 'downloading') {
+      const speedTxt = speed ? ` · ${speed}` : '';
+      label.textContent = `${progress}%${speedTxt}`;
+      fill.style.width = `${progress}%`;
+      if (dlBtn) { dlBtn.disabled = true; dlBtn.innerHTML = `⬇ ${progress}%`; }
+    } else if (status === 'completed') {
+      const msg = extra.skipped ? '✓ موجود' : '✓ تم التنزيل';
+      label.textContent = msg;
+      fill.style.width = '100%';
+      if (dlBtn) {
+        dlBtn.disabled = false;
+        dlBtn.innerHTML = '📁 افتح';
+        // Replace the listener so a re-click opens the file, not re-downloads.
+        const newBtn = dlBtn.cloneNode(true);
+        dlBtn.parentNode.replaceChild(newBtn, dlBtn);
+        newBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (extra.filePath) openDownloadedFile(extra.filePath);
+        });
+      }
+      // Auto-fade the overlay after a couple of seconds so the card looks
+      // clean again, but keep the green tint on the card itself.
+      setTimeout(() => overlay.classList.add('fade-out'), 2500);
+    } else if (status === 'error') {
+      label.textContent = '✕ فشل: ' + (extra.error || '').slice(0, 40);
+      fill.style.width = '0%';
+      if (dlBtn) { dlBtn.disabled = false; dlBtn.innerHTML = '↻ إعادة'; }
+    }
+  }
+
   function createVideoCard(item, index) {
     const card = document.createElement('div');
     card.className = 'video-card';
@@ -820,7 +1216,7 @@
         <input type="checkbox" data-index="${index}" ${state.selected.has(index) ? 'checked' : ''}>
       </label>
       <div class="card-thumbnail">
-        ${item.thumbnail ? `<img src="${escapeHtml(item.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">` : ''}
+        ${item.thumbnail ? `<img src="${escapeHtml(proxyMedia(item.thumbnail))}" alt="" loading="lazy" data-thumb="${escapeHtml(proxyMedia(item.thumbnail))}" data-retry="0" onerror="thumbRetry(this)">` : ''}
         ${item.duration ? `<span class="card-duration">${formatDuration(item.duration)}</span>` : ''}
         <span class="card-platform-badge ${escapeAttr(item.platform)}">${platformIcon}</span>
       </div>
@@ -850,13 +1246,13 @@
 
     card.querySelector('.card-dl-btn').addEventListener('click', () => {
       const url = item.url || dom.urlInput.value.trim();
-      startDownload(url, item);
+      startDownload(url, item, card);
     });
 
     // Audio-only (MP3) per-card download — overrides quality just for this task
     card.querySelector('.card-audio-btn').addEventListener('click', () => {
       const url = item.url || dom.urlInput.value.trim();
-      startDownload(url, { ...item, quality: 'audio' });
+      startDownload(url, { ...item, quality: 'audio' }, card);
     });
 
     card.querySelector('.card-info-btn').addEventListener('click', () => {
@@ -1402,14 +1798,22 @@
 
     if (playUrl) {
       const video = document.createElement('video');
-      video.src = playUrl;
+      video.src = proxyMedia(playUrl);
       video.controls = true;
       video.autoplay = true;
-      video.setAttribute('referrerpolicy', 'no-referrer');
-      video.setAttribute('crossorigin', 'anonymous');
       video.style.width = '100%';
       video.style.maxHeight = '70vh';
       dom.previewBody.appendChild(video);
+    } else if (item.thumbnail) {
+      // No streamable video URL (Instagram scraping gives thumbnails only).
+      // Show the thumbnail at least so the modal isn't a blank black box.
+      dom.previewBody.innerHTML = `
+        <div style="display:flex; flex-direction:column; align-items:center; gap:12px; padding:16px;">
+          <img src="${escapeHtml(proxyMedia(item.thumbnail))}"
+               style="max-width:100%; max-height:60vh; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+          <div class="preview-msg" style="margin:0;">المعاينة المباشرة غير متاحة — اضغط "تحميل" لجلب الفيديو الفعلي.</div>
+        </div>
+      `;
     } else {
       dom.previewBody.innerHTML = '<div class="preview-msg">لا يوجد رابط معاينة لهذه المنصة.</div>';
     }
@@ -1433,10 +1837,13 @@
     const count = state.selected.size;
     dom.selectedCount.textContent = count;
     dom.downloadSelectedBtn.disabled = count === 0;
-    // Sync DOM checkboxes with state.selected (used by quick chips)
-    $$('.video-card').forEach((card, i) => {
+    // Sync DOM checkboxes with state.selected (used by quick chips).
+    // Each card carries data-index = its absolute index in filteredResults,
+    // so this stays correct across paginated views.
+    $$('.video-card').forEach((card) => {
       const cb = card.querySelector('input[type="checkbox"]');
       if (!cb) return;
+      const i = parseInt(card.dataset.index, 10);
       const isSel = state.selected.has(i);
       if (cb.checked !== isSel) cb.checked = isSel;
       card.classList.toggle('selected', isSel);
@@ -1681,7 +2088,7 @@
       const placeholders = {
         tiktok: 'ابحث على TikTok…',
         youtube: 'ابحث على YouTube…',
-        instagram: 'ابحث: hashtag (مثلاً: عطور) أو @حساب',
+        instagram: 'ابحث: كلمة (مثل: عطور) أو @اسم-حساب — Reels مباشرة',
         facebook: 'ابحث: hashtag (مثلاً: عطور) أو @صفحة',
       };
       dom.searchInput.placeholder = placeholders[platform] || 'Search for videos...';
@@ -1702,14 +2109,38 @@
       if (showBanner) refreshFacebookLoginStatus();
     }
 
-    // Hide results that belong to a different platform.
+    // Per-platform isolation: each tab keeps its own results, context, and
+    // search query. Switching tabs swaps everything so the user only sees
+    // state belonging to the active platform.
+    if (!state.resultsByPlatform) state.resultsByPlatform = {};
+    if (!state.contextByPlatform) state.contextByPlatform = {};
+    if (!state.queryByPlatform)   state.queryByPlatform = {};
+
+    // Save current platform's state before switching away
+    const prevPlatform = state.results[0]?.platform || state.context?.platform;
+    if (prevPlatform && prevPlatform !== platform) {
+      if (state.results.length) state.resultsByPlatform[prevPlatform] = state.results.slice();
+      if (state.context)        state.contextByPlatform[prevPlatform]  = state.context;
+      if (dom.searchInput)      state.queryByPlatform[prevPlatform]    = dom.searchInput.value;
+    }
+
+    // Restore destination platform's state (or clear)
+    state.results = (state.resultsByPlatform[platform] || []).slice();
+    state.context = state.contextByPlatform[platform] || null;
+    state.selected.clear();
+    state.pagination.page = 1;
+    if (dom.searchInput) dom.searchInput.value = state.queryByPlatform[platform] || '';
+
+    // Hide any global loading indicator left over from the previous tab.
+    showLoading(false);
+
     if (state.results.length) {
-      const resultsPlatform = state.results[0]?.platform || state.context?.platform;
-      if (resultsPlatform && resultsPlatform !== platform) {
-        dom.resultsSection.classList.add('hidden');
-      } else {
-        dom.resultsSection.classList.remove('hidden');
-      }
+      dom.resultsSection.classList.remove('hidden');
+      renderResults();
+      // Force-reload any thumbnails that failed silently on previous render.
+      setTimeout(nudgeVisibleThumbnails, 200);
+    } else {
+      dom.resultsSection.classList.add('hidden');
     }
   }
 
@@ -2127,6 +2558,7 @@
       fetchInfo(url);
     });
 
+
     dom.downloadBtn.addEventListener('click', async () => {
       const raw = dom.urlInput.value.trim();
       if (!raw) return toast('من فضلك أدخل رابطًا', 'warning');
@@ -2278,6 +2710,8 @@
       state.filters.views    = dom.filterViews?.value || 'all';
       state.filters.search   = (dom.filterSearch?.value || '').trim();
       saveFiltersPreference(); // remember user's choice across sessions
+      // Filter changed → start from page 1 of the new list
+      state.pagination.page = 1;
       renderResults();
       saveResultsToStorage();
     };

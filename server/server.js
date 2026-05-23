@@ -112,6 +112,178 @@ console.log(`yt-dlp: ${YTDLP_PATH}`);
 // logged-in user. Default = chrome; configurable via env or settings.
 const INSTAGRAM_BROWSER = (process.env.MEDIAGRAB_IG_BROWSER || 'chrome').toLowerCase();
 
+// Parse a Netscape-format cookies.txt into a name→value map. Same format the
+// in-app Instagram/Facebook login flow writes, and the same format browser
+// extensions like "Get cookies.txt LOCALLY" export.
+function parseNetscapeCookies(filePath) {
+  const out = {};
+  try {
+    const text = fs.readFileSync(filePath, 'utf8');
+    for (const line of text.split(/\r?\n/)) {
+      if (!line || line.startsWith('#')) continue;
+      const parts = line.split('\t');
+      if (parts.length < 7) continue;
+      const [, , , , , name, value] = parts;
+      if (name && value !== undefined) out[name] = value;
+    }
+  } catch { /* file missing or unreadable */ }
+  return out;
+}
+
+function serializeCookies(obj) {
+  return Object.entries(obj).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
+// Direct Instagram private-API call. Two flavors depending on host:
+//  - www.instagram.com → web app headers (Sec-Ch-Ua, X-IG-WWW-Claim, …)
+//  - i.instagram.com   → mobile-app headers (real Instagram Android UA)
+// The mobile flavor is more permissive for keyword/clips searches.
+function instagramApiGet(apiUrl, cookies) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(apiUrl);
+    const isMobileHost = /^i\.instagram\.com$/i.test(parsed.hostname);
+
+    const webHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'X-IG-App-ID': '936619743392459',
+      'X-ASBD-ID': '129477',
+      'X-IG-WWW-Claim': '0',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"Windows"',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
+      'Referer': 'https://www.instagram.com/',
+      'Origin': 'https://www.instagram.com',
+    };
+    const mobileHeaders = {
+      'User-Agent': 'Instagram 309.1.0.41.113 Android (33/13; 480dpi; 1080x2274; samsung; SM-G991B; o1s; exynos2100; en_US; 547253565)',
+      'X-IG-App-ID': '567067343352427',           // Android app ID
+      'X-IG-Capabilities': '3brTvx0=',
+      'X-IG-Connection-Type': 'WIFI',
+      'X-IG-Connection-Speed': '-1kbps',
+      'X-IG-Bandwidth-Speed-KBPS': '-1.000',
+      'X-IG-Bandwidth-TotalBytes-B': '0',
+      'X-IG-Bandwidth-TotalTime-MS': '0',
+      'Accept-Language': 'en-US, en',
+    };
+
+    const headers = Object.assign(
+      isMobileHost ? mobileHeaders : webHeaders,
+      {
+        'Accept': '*/*',
+        'Accept-Encoding': 'gzip, deflate',
+        'X-CSRFToken': cookies.csrftoken || '',
+        'X-Mid': cookies.mid || '',
+        'Cookie': serializeCookies(cookies),
+      },
+    );
+
+    const req = https.request({
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method: 'GET',
+      timeout: API_TIMEOUT_MS,
+      headers,
+    }, (res) => {
+      const chunks = [];
+      const encoding = (res.headers['content-encoding'] || '').toLowerCase();
+      let stream = res;
+      if (encoding === 'gzip') stream = res.pipe(require('zlib').createGunzip());
+      else if (encoding === 'br') stream = res.pipe(require('zlib').createBrotliDecompress());
+      else if (encoding === 'deflate') stream = res.pipe(require('zlib').createInflate());
+      stream.on('data', (c) => chunks.push(c));
+      stream.on('end', () => {
+        const data = Buffer.concat(chunks).toString('utf8');
+        console.log(`[IG] ${res.statusCode} ${parsed.hostname}${parsed.pathname} (${data.length}b): ${data.slice(0, 200).replace(/\n/g, ' ')}`);
+        if (res.statusCode !== 200) {
+          return reject(new Error(`Instagram ${res.statusCode} @ ${parsed.hostname}: ${data.slice(0, 200)}`));
+        }
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Non-JSON: ' + data.slice(0, 200))); }
+      });
+      stream.on('error', reject);
+    });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('Instagram API timed out')));
+    req.end();
+  });
+}
+
+// Reels search by keyword — equivalent of the mobile app's Reels search tab.
+// Web doesn't expose this UI but the API still responds for a logged-in
+// session. We try multiple endpoint shapes because Instagram rotates them.
+async function instagramReelsSearch(query, cookiesFile, count = 30) {
+  const cookies = parseNetscapeCookies(cookiesFile);
+  if (!cookies.sessionid) throw new Error('No sessionid cookie — re-import after logging in');
+
+  const q = encodeURIComponent(query.trim());
+  // The hashtag form of the query (Instagram hashtags can't contain spaces).
+  const tagSlug = query.trim().replace(/\s+/g, '').toLowerCase();
+  const endpoints = [
+    // 1. Mobile API: clips search (Reels keyword search) — most likely to work
+    `https://i.instagram.com/api/v1/fbsearch/clips/?query=${q}`,
+    // 2. Mobile API: topsearch — finds best hashtag/account match
+    `https://i.instagram.com/api/v1/fbsearch/topsearch/?query=${q}&context=blended`,
+    // 3. Mobile API: tag content (if the query maps cleanly to a hashtag)
+    `https://i.instagram.com/api/v1/tags/${encodeURIComponent(tagSlug)}/sections/`,
+    // 4. Web fallback (sometimes works after the mobile ones fail)
+    `https://www.instagram.com/api/v1/fbsearch/clips/?query=${q}`,
+    `https://www.instagram.com/api/v1/tags/web_info/?tag_name=${encodeURIComponent(tagSlug)}`,
+  ];
+
+  let lastErr = null;
+  for (const url of endpoints) {
+    try {
+      const data = await instagramApiGet(url, cookies);
+      const clips = [];
+
+      // fbsearch/clips: { clips_serp_modules: [{ clips: [{ media: {...} }] }] }
+      for (const mod of data.clips_serp_modules || []) {
+        for (const c of mod.clips || []) {
+          if (c.media) clips.push(c.media);
+        }
+      }
+
+      // topsearch: best-effort — look for top hashtag and fall through if any
+      // media is embedded; otherwise we'd need a 2nd call.
+      for (const h of data.hashtags || []) {
+        if (h.hashtag?.media_count) {
+          // Found a hashtag — fetch its top media in a follow-up call.
+          try {
+            const tagUrl = `https://www.instagram.com/api/v1/tags/${encodeURIComponent(h.hashtag.name)}/sections/`;
+            const tag = await instagramApiGet(tagUrl, cookies);
+            for (const sec of tag.sections || []) {
+              for (const m of sec.layout_content?.medias || []) {
+                if (m.media) clips.push(m.media);
+              }
+            }
+          } catch { /* skip and try next endpoint */ }
+          break; // only follow the top hashtag
+        }
+      }
+
+      // tags/web_info: { data: { recent: { sections: [...] }, top: { sections: [...] } } }
+      const tagData = data.data || data;
+      for (const bucket of ['recent', 'top']) {
+        for (const sec of tagData[bucket]?.sections || []) {
+          for (const m of sec.layout_content?.medias || []) {
+            if (m.media) clips.push(m.media);
+          }
+        }
+      }
+
+      if (clips.length) return clips.slice(0, count);
+      lastErr = new Error('No clips in response');
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('All Instagram endpoints rejected');
+}
+
 function isInstagramUrl(u) {
   if (typeof u !== 'string') return false;
   try {
@@ -198,6 +370,73 @@ function rateLimit(req, res, next) {
 }
 app.use('/api/', rateLimit);
 
+// ─── Media proxy ───────────────────────────────────────────────────────────────
+// TikTok / Instagram / Facebook CDNs reject requests without a matching Referer.
+// The UI loads from http://localhost:3456, so direct <img>/<video> tags get
+// 403. We proxy through the server, adding the right Referer per host.
+const PROXY_ALLOW = [
+  /\.tiktokcdn\.com$/i,
+  /\.tiktokcdn-us\.com$/i,
+  /\.tiktokcdn-eu\.com$/i,
+  /\.ttwstatic\.com$/i,
+  /\.byteoversea\.com$/i,
+  /\.tiktokv\.com$/i,
+  /\.tiktokv\.us$/i,
+  /\.muscdn\.com$/i,
+  /\.cdninstagram\.com$/i,
+  /\.fbcdn\.net$/i,
+];
+function refererForHost(hostname) {
+  if (/tiktok|muscdn|byteoversea|ttwstatic/i.test(hostname)) return 'https://www.tiktok.com/';
+  if (/instagram|cdninstagram/i.test(hostname)) return 'https://www.instagram.com/';
+  if (/fbcdn|facebook/i.test(hostname)) return 'https://www.facebook.com/';
+  return '';
+}
+app.get('/api/proxy/media', (req, res) => {
+  const u = req.query.u;
+  if (!u || typeof u !== 'string') return res.status(400).end('missing u');
+  let parsed;
+  try { parsed = new URL(u); } catch { return res.status(400).end('bad url'); }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return res.status(400).end();
+  const host = parsed.hostname.toLowerCase();
+  if (!PROXY_ALLOW.some((re) => re.test(host))) return res.status(403).end('host not allowed');
+
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+  const ref = refererForHost(host);
+  if (ref) headers.Referer = ref;
+  if (req.headers.range) headers.Range = req.headers.range;
+
+  const proto = parsed.protocol === 'https:' ? https : http;
+  const upstream = proto.get(u, { headers, timeout: 30_000 }, (r) => {
+    if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+      // Follow one redirect by re-proxying the new URL
+      const redirected = new URL(r.headers.location, u).toString();
+      const redirectReq = proto.get(redirected, { headers, timeout: 30_000 }, (r2) => {
+        res.statusCode = r2.statusCode;
+        for (const [k, v] of Object.entries(r2.headers)) {
+          if (!/^(transfer-encoding|connection|keep-alive)$/i.test(k)) res.setHeader(k, v);
+        }
+        r2.pipe(res);
+      });
+      redirectReq.on('error', (e) => { if (!res.headersSent) res.status(502).end(e.message); });
+      r.destroy();
+      return;
+    }
+    res.statusCode = r.statusCode;
+    for (const [k, v] of Object.entries(r.headers)) {
+      if (!/^(transfer-encoding|connection|keep-alive)$/i.test(k)) res.setHeader(k, v);
+    }
+    r.pipe(res);
+  });
+  upstream.on('error', (e) => { if (!res.headersSent) res.status(502).end(e.message); });
+  upstream.on('timeout', () => { upstream.destroy(new Error('timeout')); });
+  req.on('close', () => { try { upstream.destroy(); } catch {} });
+});
+
 // ─── State ─────────────────────────────────────────────────────────────────────
 const activeDownloads = new Map();   // id -> { proc, request, status, info, cancelled }
 const completedDownloads = [];       // bounded
@@ -231,11 +470,14 @@ function validateOutputDir(dir) {
 }
 
 function sanitizeFilename(name) {
+  // Cap at 80 chars to stay well clear of Windows' 260-char MAX_PATH limit
+  // once the output dir + subfolder + extension are factored in. Long
+  // Instagram/TikTok captions used to blow past this and break shell.openPath.
   return String(name || 'video')
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
     .replace(/\s+/g, ' ')
     .trim()
-    .substring(0, 180) || 'video';
+    .substring(0, 80) || 'video';
 }
 
 function isHttpUrl(s) {
@@ -360,18 +602,39 @@ async function tikwmSerializedRequest(reqUrl, options) {
 //
 // onItem(item, indexStartingAt1) is fired for each video so the caller can
 // stream results to the UI as they arrive.
-async function tikwmUserPosts(username, { maxCount = 2000, onItem = null } = {}) {
+// maxCount default = Infinity → keep paginating until TikWM signals end
+// (hasMore=false or empty cursor). Pass a finite number to cap.
+async function tikwmUserPosts(username, { maxCount = Infinity, onItem = null } = {}) {
   const out = [];
   let cursor = '0';
   let idx = 0;
   while (out.length < maxCount) {
     const url = `https://www.tikwm.com/api/user/posts?unique_id=${encodeURIComponent(username)}&count=30&cursor=${encodeURIComponent(cursor)}&web=1&hd=1`;
     let data;
-    try {
-      data = await tikwmSerializedRequest(url);
-    } catch (e) {
-      // Soft-fail: return whatever we got so far instead of throwing the
-      // whole listing away.
+    let lastErr = null;
+    // Retry transient failures (TikWM occasionally returns null / non-zero
+    // for a single page even on healthy accounts). 3 tries with backoff.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        data = await tikwmSerializedRequest(url);
+        if (data && data.code === 0 && data.data) { lastErr = null; break; }
+        lastErr = new Error(`TikWM code=${data?.code} msg=${data?.msg || ''}`);
+      } catch (e) {
+        lastErr = e;
+      }
+      data = null;
+      await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
+    }
+    if (!data) {
+      // First page failed entirely → surface as an error so callers don't
+      // misread it as "empty profile" and fall back to yt-dlp (which will
+      // hit TikTok's 429 anyway).
+      if (out.length === 0 && lastErr) {
+        const err = new Error(lastErr.message || 'TikWM unavailable');
+        err.code = 'TIKWM_UNAVAILABLE';
+        throw err;
+      }
+      // Mid-pagination failure → keep what we have rather than discarding.
       break;
     }
     if (data.code !== 0 || !data.data) break;
@@ -408,7 +671,11 @@ async function tikwmGetVideo(videoUrl, retries = 4) {
   let lastErr = null;
   for (let i = 0; i < retries; i++) {
     try {
-      const data = await tikwmSerializedRequest(`https://www.tikwm.com/api/?url=${encodeURIComponent(videoUrl)}`);
+      // TikWM /api/?url=... now requires POST + form data (GET is Cloudflare-gated).
+      const data = await tikwmSerializedRequest('https://www.tikwm.com/api/', {
+        method: 'POST',
+        body: { url: videoUrl, hd: 1 },
+      });
       if (data.code === 0 && data.data) {
         const d = data.data;
         return {
@@ -586,12 +853,26 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
       '--newline',
       '--no-warnings',
       '--no-overwrites',
-      '--restrict-filenames',
+      // NOTE: --restrict-filenames is DELIBERATELY off. It strips non-ASCII
+      // chars from the WHOLE path including the parent dir, so our computed
+      // taskOutputDir (with Arabic in the subfolder name) wouldn't match the
+      // actual write location yt-dlp picks. The output template (-o) below
+      // controls filename safety on our terms.
       '--user-agent', YTDLP_UA,
       '--sleep-requests', '1',
     ];
-    if (effectiveQuality !== 'audio') args.push('--merge-output-format', 'mp4');
-    else args.push('-x', '--audio-format', 'mp3');
+    if (effectiveQuality !== 'audio') {
+      args.push('--merge-output-format', 'mp4');
+      // For Instagram in particular yt-dlp will happily return image
+      // carousel slots as the "best format" — explicitly require a video
+      // stream so it errors out on photo posts instead of silently
+      // downloading a JPG with .mp4 extension.
+      if (isInstagramUrl(ytdlpUrl)) {
+        args.push('--match-filter', 'duration>0');
+      }
+    } else {
+      args.push('-x', '--audio-format', 'mp3');
+    }
     if (speedLimitKBps > 0) args.push('--limit-rate', `${speedLimitKBps}K`);
     if (downloadSubs) args.push('--write-subs', '--write-auto-subs', '--sub-langs', 'all', '--convert-subs', 'srt');
     if (cookiesFile && fs.existsSync(cookiesFile)) args.push('--cookies', cookiesFile);
@@ -645,8 +926,12 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
 
     proc.on('close', (code) => {
       if (entry?.cancelled) return reject(new Error('Cancelled'));
-      if (code === 0) resolve(lastFile || outputDir);
-      else reject(new Error(`yt-dlp exited with code ${code}`));
+      if (code === 0) return resolve(lastFile || outputDir);
+      // 101 = item rejected by --match-filter (e.g. an Instagram photo post
+      // failing duration>0). Surface it as a friendly "not a video" message
+      // so the UI can show it as skipped, not a hard error.
+      if (code === 101) return reject(new Error('NOT_A_VIDEO'));
+      reject(new Error(`yt-dlp exited with code ${code}`));
     });
 
     proc.on('error', (err) => {
@@ -767,7 +1052,9 @@ function _ytdlpInfoRaw(targetUrl, flat = false, opts = {}) {
     let stdoutBuf = '';
     let stderr = '';
     const items = [];
-    const timeoutMs = flat ? 5 * 60_000 : 60_000;
+    // 10 min for playlist scans — large TikTok profiles can have 2000+ videos
+    // and yt-dlp paginates at ~10 items/sec, so 5 min wasn't enough.
+    const timeoutMs = flat ? 10 * 60_000 : 60_000;
     const timeout = setTimeout(() => {
       try { killProcessTree(proc); } catch {}
       reject(new Error('yt-dlp info timed out'));
@@ -851,30 +1138,25 @@ app.post('/api/info', async (req, res) => {
     if (plat === 'tiktok') {
       if (isTikTokUser(targetUrl)) {
         const username = targetUrl.match(/@([^/?]+)/)?.[1];
-
-        // Prefer TikWM's paginated user/posts API — yt-dlp's TikTok extractor
-        // stops at ~300 because TikTok throttles it, while TikWM pages cleanly.
-        let enrichedVideos = await tikwmUserPosts(username, { maxCount: 2000 });
-
-        // yt-dlp fallback in case TikWM returns nothing (banned user, region
-        // block, TikWM downtime).
-        if (!enrichedVideos.length) {
-          const cleanUrl = `https://www.tiktok.com/@${username}`;
-          const info = await ytdlpInfo(cleanUrl, true);
-          const videos = Array.isArray(info) ? info : [info];
-          enrichedVideos = videos.map((v) => ({
-            id: v.id,
-            title: v.title || `Video ${v.id}`,
-            cover: v.thumbnails?.[0]?.url || v.thumbnail || '',
-            duration: v.duration,
-            author: { nickname: v.uploader || username, unique_id: username },
-            play_count: v.view_count || 0,
-            play: null,
-            hdplay: null,
-            url: v.url || v.webpage_url,
-          }));
-        }
-
+        // TikWM's /api/user/posts is Cloudflare-gated and unreliable. yt-dlp
+        // uses TikTok's real pagination API and pulls the full profile in one
+        // pass (verified: 2019 items on a 2k-post account, zero blocks).
+        const cleanUrl = `https://www.tiktok.com/@${username}`;
+        const info = await ytdlpInfo(cleanUrl, true);
+        const videos = Array.isArray(info) ? info : [info];
+        const enrichedVideos = videos.map((v) => ({
+          id: v.id,
+          title: v.title || `Video ${v.id}`,
+          cover: v.thumbnails?.[0]?.url || v.thumbnail || '',
+          thumbnail: v.thumbnails?.[0]?.url || v.thumbnail || '',
+          duration: v.duration,
+          author: { nickname: v.uploader || username, unique_id: username },
+          play_count: v.view_count || 0,
+          views: v.view_count || 0,
+          play: null,
+          hdplay: null,
+          url: v.url || v.webpage_url,
+        }));
         return res.json({ type: 'channel', platform: 'tiktok', data: { videos: enrichedVideos } });
       } else {
         const tikInfo = await tikwmGetVideo(targetUrl);
@@ -1082,6 +1364,17 @@ app.post('/api/download', async (req, res) => {
             return; // success
           } catch (err) {
             lastErr = err;
+            // "Not a video" is a known dead-end (Instagram photo post). Don't
+            // retry and surface it as a graceful skip rather than red error.
+            if (/NOT_A_VIDEO/.test(err.message)) {
+              emitProgress(task.id, {
+                title: task.title, progress: 100, speed: '',
+                status: 'completed', skipped: true,
+                error: 'تخطّى — البوست ده صور مش فيديو',
+              });
+              activeDownloads.delete(task.id);
+              return;
+            }
             console.log(`Attempt ${attempt + 1} failed for ${task.id}: ${err.message}`);
           }
         }
@@ -1305,20 +1598,9 @@ app.post('/api/info-stream', async (req, res) => {
       platform: plat || 'other',
     };
 
-    // TikTok user pages: stream via TikWM's paginated API (deeper + faster
-    // than yt-dlp). Other URLs still use the yt-dlp path.
-    if (isUserPage && username) {
-      try {
-        await tikwmUserPosts(username, {
-          maxCount: 2000,
-          onItem: (item, idx) => {
-            count = idx;
-            emit('listing:item', { item: { ...item, platform: 'tiktok' }, index: idx });
-          },
-        });
-      } catch (e) { /* fall through to yt-dlp */ }
-      if (count > 0) { emit('listing:complete', { count }); return; }
-    }
+    // TikTok user pages go straight to yt-dlp — TikWM's /api/user/posts is
+    // Cloudflare-gated and unreliable; yt-dlp uses TikTok's real pagination
+    // API and pulls the full profile in a single pass.
 
     // Cache hit → emit all items immediately, no yt-dlp run.
     const cached = getYtdlpInfoCached(cleanUrl, true);
@@ -1353,19 +1635,65 @@ app.post('/api/search', async (req, res) => {
   try {
     const { query, platform, count = 30, mode } = req.body || {};
     if (!query || typeof query !== 'string') return res.status(400).json({ error: 'Query is required' });
-    const safeCount = Math.max(1, Math.min(500, parseInt(count, 10) || 30));
+    // count <= 0 or 'all' / 'unlimited' → no cap (paginate until upstream is exhausted)
+    const isUnlimited = count === 0 || count === -1 || count === 'all' || count === 'unlimited';
+    const safeCount = isUnlimited
+      ? Infinity
+      : Math.max(1, Math.min(100000, parseInt(count, 10) || 30));
     const plat = (platform || '').toLowerCase();
 
     if (plat === 'instagram') {
-      // Instagram needs the user's Chrome cookies (logged-in). We accept either:
-      //   { query: "hashtag_name", mode: "hashtag" }
-      //   { query: "username",     mode: "account"  }
-      //   { query: "https://instagram.com/..."     } - direct URL
       const igMode = (mode || 'hashtag').toLowerCase();
+
+      // Hashtag search via yt-dlp is dead (Instagram disabled /explore/tags
+      // for unauthenticated scraping). Use the mobile clips-search endpoint
+      // directly with the user's logged-in cookies — same data the mobile
+      // app's Reels search tab shows.
+      if (igMode === 'hashtag') {
+        const dataDir = process.env.MEDIAGRAB_DATA_DIR || path.join(__dirname, 'data');
+        const cookiesFile = path.join(dataDir, 'instagram-cookies.txt');
+        if (!fs.existsSync(cookiesFile)) {
+          return res.status(401).json({
+            error: 'محتاج كوكيز Instagram للبحث بكلمة. اضغط "تسجيل دخول" أو "استيراد كوكيز" فوق.',
+          });
+        }
+        try {
+          const clips = await instagramReelsSearch(query, cookiesFile, safeCount);
+          return res.json({
+            platform: 'instagram',
+            mode: 'reels-search',
+            results: clips.map((m) => {
+              const owner = m.owner || m.user || {};
+              const shortcode = m.code || m.shortcode || m.pk || m.id;
+              const videoVer = (m.video_versions && m.video_versions[0]) || {};
+              return {
+                id: m.pk || m.id || shortcode,
+                title: m.caption?.text?.substring(0, 200) || `Reel ${shortcode}`,
+                url: shortcode ? `https://www.instagram.com/reel/${shortcode}/` : '',
+                duration: Math.round(m.video_duration || 0),
+                thumbnail: (m.image_versions2?.candidates?.[0]?.url) || m.thumbnail_url || '',
+                uploader: owner.username || '',
+                author: owner.full_name || owner.username || '',
+                playCount: m.play_count || m.view_count || 0,
+                downloadUrl: videoVer.url || null,
+              };
+            }),
+          });
+        } catch (e) {
+          return res.status(500).json({
+            error: 'فشل البحث: ' + e.message + ' — جرّب @اسم-حساب بدلاً منها.',
+            raw: e.message,
+          });
+        }
+      }
+
+      // Account mode → yt-dlp on the profile page (still works).
       const igUrl = buildInstagramUrl(query, igMode);
       if (!igUrl) return res.status(400).json({ error: 'Invalid Instagram input' });
       try {
-        const info = await ytdlpInfo(igUrl, true, { playlistEnd: safeCount });
+        // Infinity → omit playlistEnd so yt-dlp pulls the full profile.
+        const ytOpts = Number.isFinite(safeCount) ? { playlistEnd: safeCount } : {};
+        const info = await ytdlpInfo(igUrl, true, ytOpts);
         const list = Array.isArray(info) ? info : [info];
         return res.json({
           platform: 'instagram',
@@ -1384,11 +1712,18 @@ app.post('/api/search', async (req, res) => {
         });
       } catch (e) {
         const msg = String(e?.message || e);
+        const tagBroken = /instagram:tag|Unable to extract data/i.test(msg) && igMode === 'hashtag';
         const needsLogin = /login|cookies?|private|429|rate|HTTP Error 4\d\d/i.test(msg);
-        return res.status(needsLogin ? 401 : 500).json({
-          error: needsLogin
-            ? 'متعرفش يقرأ كوكيز Instagram من Chrome. اقفل Chrome تماماً وجرب تاني (لازم تكون مسجل دخول Instagram على Chrome).'
-            : msg,
+        let errorMsg;
+        if (tagBroken) {
+          errorMsg = 'Instagram عطّل قراءة صفحات الـ hashtags. جرّب تبحث بـ @اسم-حساب بدلاً منها — ده شغّال.';
+        } else if (needsLogin) {
+          errorMsg = 'متعرفش يقرأ كوكيز Instagram من Chrome. اقفل Chrome تماماً وجرب تاني، أو استورد ملف كوكيز بزرار "استيراد كوكيز".';
+        } else {
+          errorMsg = msg;
+        }
+        return res.status(needsLogin || tagBroken ? 401 : 500).json({
+          error: errorMsg,
           raw: msg,
         });
       }
@@ -1401,7 +1736,8 @@ app.post('/api/search', async (req, res) => {
       const fbUrl = buildFacebookUrl(query, fbMode);
       if (!fbUrl) return res.status(400).json({ error: 'Invalid Facebook input' });
       try {
-        const info = await ytdlpInfo(fbUrl, true, { playlistEnd: safeCount });
+        const ytOpts = Number.isFinite(safeCount) ? { playlistEnd: safeCount } : {};
+        const info = await ytdlpInfo(fbUrl, true, ytOpts);
         const list = Array.isArray(info) ? info : [info];
         return res.json({
           platform: 'facebook',
@@ -1431,26 +1767,57 @@ app.post('/api/search', async (req, res) => {
     }
 
     if (plat === 'tiktok') {
-      const data = await apiRequest('https://www.tikwm.com/api/feed/search', {
-        method: 'POST',
-        body: { keywords: query, count: safeCount },
-      });
-      return res.json({
-        platform: 'tiktok',
-        results: (data.data?.videos || []).map((v) => ({
-          id: v.id, title: v.title,
-          thumbnail: v.cover || v.origin_cover,
-          duration: v.duration,
-          author: v.author?.nickname || v.author?.unique_id,
-          playCount: v.play_count,
-          url: `https://www.tiktok.com/@${v.author?.unique_id}/video/${v.id}`,
-          downloadUrl: v.play, hdDownloadUrl: v.hdplay,
-        })),
-      });
+      // Paginate through TikWM's feed/search via cursor. De-dupe by video ID
+      // because TikWM's cursor windows occasionally overlap, especially for
+      // popular queries.
+      const out = [];
+      const seenIds = new Set();
+      let cursor = '0';
+      const start = Date.now();
+      // Bigger budget for unlimited requests — TikWM pages slowly.
+      const TIME_BUDGET_MS = Number.isFinite(safeCount) ? 90_000 : 600_000;
+      while (out.length < safeCount && (Date.now() - start) < TIME_BUDGET_MS) {
+        let data;
+        try {
+          data = await apiRequest('https://www.tikwm.com/api/feed/search', {
+            method: 'POST',
+            body: { keywords: query, count: 30, cursor },
+          });
+        } catch { break; }
+        const videos = data?.data?.videos || [];
+        if (!videos.length) break;
+        let addedThisPage = 0;
+        for (const v of videos) {
+          const vid = v.video_id || v.id;
+          if (!vid || seenIds.has(vid)) continue;
+          seenIds.add(vid);
+          out.push({
+            id: vid, title: v.title,
+            thumbnail: v.cover || v.origin_cover,
+            duration: v.duration,
+            author: v.author?.nickname || v.author?.unique_id,
+            playCount: v.play_count,
+            url: `https://www.tiktok.com/@${v.author?.unique_id}/video/${vid}`,
+            downloadUrl: v.play, hdDownloadUrl: v.hdplay,
+          });
+          addedThisPage++;
+          if (out.length >= safeCount) break;
+        }
+        if (!data.data.hasMore) break;
+        // If a whole page added nothing new, TikWM is stuck on the same window
+        // — bail rather than spin forever.
+        if (addedThisPage === 0) break;
+        cursor = String(data.data.cursor || '');
+        if (!cursor || cursor === '0') break;
+      }
+      return res.json({ platform: 'tiktok', results: out });
     }
 
     if (plat === 'youtube' || !plat) {
-      const searchQuery = `ytsearch${safeCount}:${query.replace(/"/g, '')}`;
+      // yt-dlp accepts ytsearchN — for "unlimited" we ask for a big-but-finite N
+      // since ytsearchall isn't a thing.
+      const ytCount = Number.isFinite(safeCount) ? safeCount : 1000;
+      const searchQuery = `ytsearch${ytCount}:${query.replace(/"/g, '')}`;
       const info = await ytdlpInfo(searchQuery, true);
       const results = Array.isArray(info) ? info : [info];
       return res.json({

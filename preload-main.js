@@ -7,11 +7,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Instagram in-app login
+  // Instagram in-app login + direct API fetch (uses Chromium's network stack
+  // to bypass the bot detection that blocks Node's https module).
   instagram: {
     status: () => ipcRenderer.invoke('instagram:status'),
     login: () => ipcRenderer.invoke('instagram:login'),
     logout: () => ipcRenderer.invoke('instagram:logout'),
+    apiFetch: (url) => ipcRenderer.invoke('instagram:apiFetch', url),
+    searchViaPage: (query) => ipcRenderer.invoke('instagram:searchViaPage', query),
   },
   // Facebook in-app login (same pattern as Instagram)
   facebook: {

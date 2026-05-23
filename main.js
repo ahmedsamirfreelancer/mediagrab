@@ -181,12 +181,36 @@ ipcMain.handle('shell:showItemInFolder', async (_evt, filePath) => {
 ipcMain.handle('shell:openPath', async (_evt, filePath) => {
   if (typeof filePath !== 'string' || !filePath) return { success: false };
   try {
-    const err = await shell.openPath(filePath);
-    return err ? { success: false, error: err } : { success: true };
+    // Windows MAX_PATH workaround: the \\?\ prefix lifts the 260-char limit
+    // for the actual file open. Required when Arabic captions push paths
+    // past the limit.
+    const winLong = process.platform === 'win32' && filePath.length > 240 && !filePath.startsWith('\\\\?\\')
+      ? '\\\\?\\' + filePath
+      : filePath;
+    let err = await shell.openPath(winLong);
+    if (err && winLong !== filePath) {
+      // Some shells reject the \\?\ prefix — try once without.
+      err = await shell.openPath(filePath);
+    }
+    if (err) {
+      // Last resort: open the parent folder so the user can find it manually.
+      const folder = path.dirname(filePath);
+      if (fs.existsSync(folder)) {
+        const ferr = await shell.openPath(folder);
+        if (!ferr) return { success: true, openedFolder: true };
+      }
+      return { success: false, error: err };
+    }
+    return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
   }
 });
+
+/* TikTok user URLs now go through yt-dlp in server.js — no Electron-side
+ * scraper/bridge/login needed. yt-dlp uses TikTok's real pagination API and
+ * pulls full profiles in one pass without authentication. */
+
 
 /* ─── Instagram in-app login ─────────────────────────────────────────────── */
 
@@ -383,6 +407,185 @@ ipcMain.handle('facebook:logout', async () => {
 function getDataDir() {
   return path.join(app.getPath('userData'), 'data');
 }
+
+/* ─── Instagram API fetch via Electron's Chromium network stack ──────────
+ * Node's https module gets blocked by Instagram's CDN because its TLS
+ * fingerprint is identifiable as non-browser. Electron's net.fetch uses
+ * Chromium's network stack, so the request looks like a real Chrome session.
+ * We inject the imported cookies file into the persist:instagram session,
+ * then fetch with that session.
+ */
+async function injectCookiesFromFileToSession(filePath, ses) {
+  if (!fs.existsSync(filePath)) return 0;
+  // Always re-inject — the imported cookies are the source of truth and the
+  // session may have stale values from a prior login attempt.
+  const text = fs.readFileSync(filePath, 'utf8');
+  let added = 0;
+  let failed = 0;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line || line.startsWith('#')) continue;
+    const parts = line.split('\t');
+    if (parts.length < 7) continue;
+    const [rawDomain, , cpath, secure, expiry, name, value] = parts;
+    // Electron's cookies.set wants the domain WITHOUT the Netscape leading
+    // dot. The dot is wire-format only — Electron handles subdomain scoping
+    // via the URL + an empty/missing domain field.
+    const hostDomain = rawDomain.replace(/^\./, '');
+    const isSecure = secure === 'TRUE';
+    const url = (isSecure ? 'https://' : 'http://') + hostDomain + (cpath || '/');
+    try {
+      await ses.cookies.set({
+        url,
+        name,
+        value,
+        domain: rawDomain.startsWith('.') ? rawDomain : hostDomain,
+        path: cpath || '/',
+        secure: isSecure,
+        httpOnly: name === 'sessionid' || name === 'csrftoken',
+        sameSite: 'no_restriction',
+        expirationDate: parseInt(expiry, 10) || undefined,
+      });
+      added++;
+    } catch (e) {
+      failed++;
+      console.log(`[IG cookie] failed ${name}: ${e.message}`);
+    }
+  }
+  console.log(`[IG cookie] injected ${added}, failed ${failed}`);
+  return added;
+}
+
+ipcMain.handle('instagram:apiFetch', async (_evt, urlStr) => {
+  const ses = session.fromPartition(IG_SESSION_PARTITION);
+  await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
+  const cookies = await ses.cookies.get({ domain: '.instagram.com' });
+  const cookieMap = Object.fromEntries(cookies.map((c) => [c.name, c.value]));
+
+  const { net } = require('electron');
+  try {
+    // Use the session's own fetch — it handles cookies + TLS like a real
+    // browser tab. Avoid forbidden headers (Sec-Fetch-*, Cookie, Referer,
+    // Accept-Encoding) because Chromium sets those itself; passing them
+    // triggers ERR_INVALID_ARGUMENT.
+    const response = await net.fetch(urlStr, {
+      method: 'GET',
+      session: ses,
+      credentials: 'include',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+        'X-IG-App-ID': '936619743392459',
+        'X-ASBD-ID': '129477',
+        'X-IG-WWW-Claim': '0',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRFToken': cookieMap.csrftoken || '',
+      },
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return { success: false, status: response.status, error: text.slice(0, 300) };
+    }
+    try { return { success: true, data: JSON.parse(text) }; }
+    catch { return { success: false, error: 'Non-JSON: ' + text.slice(0, 300) }; }
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+/* ─── Last-resort: real-browser search ──────────────────────────────────
+ * Instagram's API endpoints return "Oops, an error occurred" to programmatic
+ * callers even with valid cookies — they fingerprint the request shape.
+ * The reliable workaround is to load Instagram's actual search page in a
+ * hidden Electron window (same session, real Chromium render) and scrape
+ * the rendered DOM. From Instagram's view this looks identical to a user
+ * scrolling the search tab in their browser.
+ */
+ipcMain.handle('instagram:searchViaPage', async (_evt, query) => {
+  const ses = session.fromPartition(IG_SESSION_PARTITION);
+  await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
+
+  const win = new BrowserWindow({
+    show: false,
+    width: 1280,
+    height: 900,
+    webPreferences: {
+      partition: IG_SESSION_PARTITION,
+      contextIsolation: true,
+      nodeIntegration: false,
+      offscreen: false,
+    },
+  });
+
+  try {
+    const url = `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(query)}`;
+    await win.loadURL(url);
+
+    // Initial render
+    await new Promise((r) => setTimeout(r, 3500));
+
+    // Keep scrolling until Instagram stops loading new items. We give it up
+    // to 60 scrolls (~90s) and stop early after 4 consecutive scrolls that
+    // produce no new anchors (Instagram is out of results for this query).
+    const MAX_SCROLLS = 60;
+    const STAGNANT_LIMIT = 4;
+    let stagnant = 0;
+    let lastCount = 0;
+    for (let i = 0; i < MAX_SCROLLS; i++) {
+      try {
+        await win.webContents.executeJavaScript('window.scrollTo(0, document.body.scrollHeight);');
+      } catch { break; }
+      await new Promise((r) => setTimeout(r, 1500));
+      let currentCount = 0;
+      try {
+        currentCount = await win.webContents.executeJavaScript(
+          'document.querySelectorAll(\'a[href*="/reel/"], a[href*="/p/"]\').length'
+        );
+      } catch { break; }
+      if (currentCount <= lastCount) {
+        stagnant++;
+        if (stagnant >= STAGNANT_LIMIT) break;
+      } else {
+        stagnant = 0;
+        lastCount = currentCount;
+      }
+    }
+
+    // Scrape both /reel/ and /p/ anchors. Instagram's keyword-search page
+    // actually puts the bulk of its reels under /p/ URLs even though they're
+    // video posts. We keep both in the listing; the yt-dlp side has a
+    // --match-filter "duration>0" that auto-skips any /p/ items that turn
+    // out to be photo carousels.
+    const results = await win.webContents.executeJavaScript(`
+      (() => {
+        const seen = new Set();
+        const out = [];
+        for (const a of document.querySelectorAll('a[href*="/reel/"], a[href*="/p/"]')) {
+          const m = a.getAttribute('href').match(/\\/(reel|p)\\/([^/?]+)/);
+          if (!m) continue;
+          const key = m[2];
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const img = a.querySelector('img');
+          out.push({
+            id: key,
+            kind: m[1],
+            url: 'https://www.instagram.com/' + m[1] + '/' + key + '/',
+            thumbnail: img ? img.src : '',
+            alt: img ? (img.alt || '') : '',
+          });
+        }
+        return out;
+      })();
+    `);
+
+    return { success: true, results, scrolls: lastCount };
+  } catch (e) {
+    return { success: false, error: e.message };
+  } finally {
+    try { win.close(); } catch {}
+  }
+});
 
 ipcMain.handle('cookies:import', async (_evt, platform) => {
   if (platform !== 'instagram' && platform !== 'facebook') {
