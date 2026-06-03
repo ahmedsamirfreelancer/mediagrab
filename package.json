@@ -1,6 +1,6 @@
 {
   "name": "mediagrab",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "MediaGrab — Multi-platform video downloader",
   "main": "main.js",
   "author": "Ahmed",
@@ -24,7 +24,7 @@
     "@electron/packager": "^20.0.0",
     "electron": "^32.2.0",
     "electron-builder": "^25.1.8",
-    "javascript-obfuscator": "^4.1.1"
+    "javascript-obfuscator": "^4.2.2"
   },
   "build": {
     "appId": "com.arqami.mediagrab",
@@ -59,7 +59,7 @@
       {
         "provider": "github",
         "owner": "ahmedsamirfreelancer",
-        "repo": "mediagrab",
+        "repo": "mediagrab-releases",
         "releaseType": "release"
       }
     ],

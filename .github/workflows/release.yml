@@ -69,8 +69,11 @@ jobs:
         run: node scripts/obfuscate.js
 
       - name: Build + publish installer
+        # Publishes to the separate PUBLIC mediagrab-releases repo so installed
+        # clients (which can't read this private repo) can fetch updates.
+        # RELEASES_TOKEN = a fine-grained PAT with Contents:write on that repo.
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         # `--publish always` creates the GitHub release if missing.
         # We invoke electron-builder directly so this flag actually reaches it
         # (passing through `npm run build -- ...` is finicky in cmd/PowerShell).
