@@ -1630,6 +1630,22 @@ app.post('/api/info-stream', async (req, res) => {
   }
 });
 
+// Light Arabic/text normalization for relevance matching: strip tashkeel,
+// unify alef/ya/hamza/ta-marbuta variants, drop punctuation, lowercase.
+function normalizeArabic(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[ً-ْٰ]/g, '')        // tashkeel + superscript alef
+    .replace(/[أإآ]/g, 'ا')   // أ إ آ → ا
+    .replace(/ى/g, 'ي')                 // ى → ي
+    .replace(/ؤ/g, 'و')                 // ؤ → و
+    .replace(/ئ/g, 'ي')                 // ئ → ي
+    .replace(/ة/g, 'ه')                 // ة → ه
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // POST /api/search
 app.post('/api/search', async (req, res) => {
   try {
@@ -1770,9 +1786,28 @@ app.post('/api/search', async (req, res) => {
       // Paginate through TikWM's feed/search via cursor. De-dupe by video ID
       // because TikWM's cursor windows occasionally overlap, especially for
       // popular queries.
+      //
+      // Relevance filter: TikWM ranks the first pages well but drifts into
+      // loosely-related content on deeper cursors (general "books"/"reading"
+      // clips, ads, off-topic videos). We keep only videos whose text matches
+      // a majority of the query's significant tokens, so "all results" means
+      // "all RELEVANT results" instead of a long junk tail.
+      const qTokens = normalizeArabic(query).split(' ').filter((t) => t.length >= 2);
+      const required = qTokens.length ? Math.max(1, Math.ceil(qTokens.length * 0.6)) : 0;
+      const isRelevant = (v) => {
+        if (!required) return true;
+        const hay = normalizeArabic(
+          `${v.title || ''} ${v.author?.nickname || ''} ${v.author?.unique_id || ''}`
+        );
+        let hits = 0;
+        for (const t of qTokens) if (hay.includes(t)) hits++;
+        return hits >= required;
+      };
+
       const out = [];
       const seenIds = new Set();
       let cursor = '0';
+      let driftPages = 0; // consecutive pages that added nothing relevant
       const start = Date.now();
       // Bigger budget for unlimited requests — TikWM pages slowly.
       const TIME_BUDGET_MS = Number.isFinite(safeCount) ? 90_000 : 600_000;
@@ -1786,11 +1821,14 @@ app.post('/api/search', async (req, res) => {
         } catch { break; }
         const videos = data?.data?.videos || [];
         if (!videos.length) break;
-        let addedThisPage = 0;
+        let addedThisPage = 0; // relevant videos pushed this page
+        let newThisPage = 0;   // de-duped new videos seen this page
         for (const v of videos) {
           const vid = v.video_id || v.id;
           if (!vid || seenIds.has(vid)) continue;
           seenIds.add(vid);
+          newThisPage++;
+          if (!isRelevant(v)) continue;
           out.push({
             id: vid, title: v.title,
             thumbnail: v.cover || v.origin_cover,
@@ -1804,9 +1842,13 @@ app.post('/api/search', async (req, res) => {
           if (out.length >= safeCount) break;
         }
         if (!data.data.hasMore) break;
-        // If a whole page added nothing new, TikWM is stuck on the same window
-        // — bail rather than spin forever.
-        if (addedThisPage === 0) break;
+        // If a whole page added nothing NEW (all duplicates), TikWM is stuck on
+        // the same window — bail rather than spin forever.
+        if (newThisPage === 0) break;
+        // Once results stop being relevant for a few pages in a row, TikWM has
+        // drifted off-topic — stop instead of collecting unrelated videos.
+        if (addedThisPage === 0) { if (++driftPages >= 3) break; }
+        else driftPages = 0;
         cursor = String(data.data.cursor || '');
         if (!cursor || cursor === '0') break;
       }
