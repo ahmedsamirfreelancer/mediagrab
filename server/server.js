@@ -1646,6 +1646,13 @@ function normalizeArabic(s) {
     .trim();
 }
 
+// Short-lived cache of TikTok search results, keyed by query. TikWM paginates
+// inconsistently (sometimes 2 pages, sometimes 8), so the same search returns a
+// different count each time. Caching makes a repeated search return the exact
+// same set for a few minutes.
+const tiktokSearchCache = new Map(); // key -> { ts, results }
+const TIKTOK_SEARCH_TTL_MS = 10 * 60 * 1000;
+
 // POST /api/search
 app.post('/api/search', async (req, res) => {
   try {
@@ -1783,6 +1790,14 @@ app.post('/api/search', async (req, res) => {
     }
 
     if (plat === 'tiktok') {
+      // Return the cached set if this exact query was searched recently, so the
+      // result count stays stable instead of changing with TikWM's flaky paging.
+      const cacheKey = `${query.trim().toLowerCase()}|${safeCount}`;
+      const cachedHit = tiktokSearchCache.get(cacheKey);
+      if (cachedHit && Date.now() - cachedHit.ts < TIKTOK_SEARCH_TTL_MS) {
+        return res.json({ platform: 'tiktok', results: cachedHit.results, cached: true });
+      }
+
       // Paginate through TikWM's feed/search via cursor. De-dupe by video ID
       // because TikWM's cursor windows occasionally overlap, especially for
       // popular queries.
@@ -1820,13 +1835,20 @@ app.post('/api/search', async (req, res) => {
       // Cap so an "unlimited" search doesn't crawl forever; plenty of breadth.
       const COLLECT_CAP = Number.isFinite(safeCount) ? safeCount * 2 : 300;
       while (out.length < COLLECT_CAP && (Date.now() - start) < TIME_BUDGET_MS) {
-        let data;
-        try {
-          data = await apiRequest('https://www.tikwm.com/api/feed/search', {
-            method: 'POST',
-            body: { keywords: query, count: 30, cursor },
-          });
-        } catch { break; }
+        // TikWM frequently returns an empty page mid-stream (rate limiting). Retry
+        // the same cursor a few times before giving up, so we don't stop short and
+        // return a smaller-than-usual set.
+        let data = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            data = await apiRequest('https://www.tikwm.com/api/feed/search', {
+              method: 'POST',
+              body: { keywords: query, count: 30, cursor },
+            });
+          } catch { data = null; }
+          if (data?.data?.videos?.length) break;
+          await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+        }
         const videos = data?.data?.videos || [];
         if (!videos.length) break;
         let keptThisPage = 0;
@@ -1863,6 +1885,11 @@ app.post('/api/search', async (req, res) => {
       out.sort((a, b) => (b._score - a._score) || ((b.playCount || 0) - (a.playCount || 0)));
       const ranked = (Number.isFinite(safeCount) ? out.slice(0, safeCount) : out)
         .map(({ _score, ...rest }) => rest);
+      // Cache so a repeat of this exact search returns the same set (stable count).
+      tiktokSearchCache.set(cacheKey, { ts: Date.now(), results: ranked });
+      if (tiktokSearchCache.size > 50) {
+        tiktokSearchCache.delete(tiktokSearchCache.keys().next().value);
+      }
       return res.json({ platform: 'tiktok', results: ranked });
     }
 
