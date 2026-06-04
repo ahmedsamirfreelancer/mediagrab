@@ -1793,7 +1793,10 @@ app.post('/api/search', async (req, res) => {
       // a majority of the query's significant tokens, so "all results" means
       // "all RELEVANT results" instead of a long junk tail.
       const qTokens = normalizeArabic(query).split(' ').filter((t) => t.length >= 2);
-      const required = qTokens.length ? Math.max(1, Math.ceil(qTokens.length * 0.6)) : 0;
+      // Looser relevance: require only ~40% of the query tokens to match (min 1).
+      // Brings in many more near-matches — closer to TikTok's own broad results —
+      // while still cutting the totally-unrelated tail.
+      const required = qTokens.length ? Math.max(1, Math.floor(qTokens.length * 0.4)) : 0;
       const isRelevant = (v) => {
         if (!required) return true;
         const hay = normalizeArabic(
@@ -1847,7 +1850,7 @@ app.post('/api/search', async (req, res) => {
         if (newThisPage === 0) break;
         // Once results stop being relevant for a few pages in a row, TikWM has
         // drifted off-topic — stop instead of collecting unrelated videos.
-        if (addedThisPage === 0) { if (++driftPages >= 3) break; }
+        if (addedThisPage === 0) { if (++driftPages >= 6) break; }
         else driftPages = 0;
         cursor = String(data.data.cursor || '');
         if (!cursor || cursor === '0') break;
