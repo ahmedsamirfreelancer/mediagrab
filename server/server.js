@@ -1787,34 +1787,28 @@ app.post('/api/search', async (req, res) => {
       // because TikWM's cursor windows occasionally overlap, especially for
       // popular queries.
       //
-      // TikTok-style: trust TikWM's own relevance order (it already understands
-      // that English "Calvin Klein"/"CK" matches an Arabic query), keep what it
-      // returns, and drop only empty generic-tag spam (#fyp #foryou …). We still
-      // RANK so that videos whose text actually contains the query words float to
-      // the top, with everything else (incl. English matches TikTok surfaced)
-      // below. Matching is spelling-tolerant: long vowels are stripped so
-      // كلفين/كيلفين/كلين/كلاين all count as the same word.
+      // Accuracy-first: keep only videos whose text genuinely matches the query
+      // (a majority of its words), ranked best-first. Trusting TikWM's full feed
+      // pulled in far too much off-topic content (boxing, dogs, ads, comedy), so
+      // we filter instead — there are only ~20-30 truly-matching videos for a
+      // brand query and the rest is noise. Matching is spelling-tolerant.
       const qTokens = normalizeArabic(query).split(' ').filter((t) => t.length >= 2);
       const qNorm = normalizeArabic(query).trim();
       const skel = (s) => s.replace(/[اوي]/g, ''); // collapse Arabic long vowels
       const qSkel = qTokens.map(skel).filter((t) => t.length >= 2);
-      // Generic spam tags: a post that is ONLY these (no real words) is junk.
-      const SPAM_TAGS = new Set([
-        'fyp', 'foryou', 'foryoupage', 'fory', 'foru', 'for', 'viral', 'viraltiktok',
-        'viralvideo', 'trending', 'tranding', 'trend', 'trends', 'relatable', 'explore',
-        'duet', 'capcut', 'tiktok', 'tiktokshop', 'funny', 'famous', 'makemefamouse',
-        'ترند', 'اكسبلور', 'الشعب', 'الصيني', 'حل', 'ضحك', 'فوريو', 'خلفيات', 'تيك', 'توك',
-      ]);
+      // Accuracy-first gate: a video must match a MAJORITY (~60%) of the query
+      // words to be kept, so a single ambiguous word ("بوكسر" = boxer/boxing/dog)
+      // is not enough on a multi-word query. Spelling-tolerant via the skeleton,
+      // so كلفين/كيلفين/كلين/كلاين all count. There really are only ~20-30 videos
+      // that genuinely match a brand query — anything looser is off-topic.
+      const entryThreshold = qSkel.length ? Math.max(1, Math.ceil(qSkel.length * 0.6)) : 0;
       const evalVideo = (v) => {
         const norm = normalizeArabic(`${v.title || ''} ${v.author?.nickname || ''}`);
         const skHay = skel(norm);
         let score = 0;
         for (const t of qSkel) if (skHay.includes(t)) score++;
         if (qNorm && norm.includes(qNorm)) score += qSkel.length; // verbatim phrase bonus
-        // Real (non-spam) words let TikTok's own relevant hits through even with
-        // zero Arabic token match (e.g. "Calvin Klein boxer" written in English).
-        const realWords = norm.split(' ').filter((w) => w.length >= 2 && !SPAM_TAGS.has(w));
-        return { keep: score > 0 || realWords.length >= 2, score };
+        return { keep: score >= entryThreshold, score };
       };
 
       const out = [];
