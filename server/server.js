@@ -1796,6 +1796,11 @@ app.post('/api/search', async (req, res) => {
       // results, but the accurate ones lead.
       const qTokens = normalizeArabic(query).split(' ').filter((t) => t.length >= 2);
       const qNorm = normalizeArabic(query).trim();
+      // Accuracy-first gate: a video must match a MAJORITY (~60%) of the query
+      // tokens to enter, so a single ambiguous word ("بوكسر" = boxer/boxing/dog)
+      // is NOT enough on a multi-word query. Among those that pass, ranking still
+      // puts the closest first. Fewer-but-on-topic instead of a loose junk tail.
+      const entryThreshold = qTokens.length ? Math.max(1, Math.ceil(qTokens.length * 0.6)) : 0;
       const scoreOf = (v) => {
         if (!qTokens.length) return 1;
         const hay = normalizeArabic(
@@ -1835,7 +1840,7 @@ app.post('/api/search', async (req, res) => {
           seenIds.add(vid);
           newThisPage++;
           const score = scoreOf(v);
-          if (score <= 0) continue; // shares no query word → totally unrelated
+          if (score < entryThreshold) continue; // not enough query words → off-topic
           out.push({
             id: vid, title: v.title,
             thumbnail: v.cover || v.origin_cover,
