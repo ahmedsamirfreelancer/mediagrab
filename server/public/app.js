@@ -1765,7 +1765,10 @@
       return;
     }
 
-    let playUrl = item.hdDownloadUrl || item.downloadUrl;
+    // Prefer the standard `play` URL for preview: it reliably supports range
+    // requests (seeking), while `hdplay` is often missing/unseekable. Download
+    // still uses HD elsewhere — this only affects the in-app preview player.
+    let playUrl = item.downloadUrl || item.hdDownloadUrl;
 
     // TikTok lazy-resolve: listing returned items without download URLs to be fast.
     if (platform === 'tiktok' && !playUrl && item.url) {
@@ -1776,7 +1779,7 @@
         if (r.ok && (data.play || data.hdplay)) {
           item.downloadUrl   = data.play;
           item.hdDownloadUrl = data.hdplay;
-          playUrl = data.hdplay || data.play;
+          playUrl = data.play || data.hdplay;
           // Update the cached results so the next click is instant
           const cached = state.results.find((r) => r === item || r.url === item.url);
           if (cached) {
