@@ -1804,8 +1804,14 @@
       video.src = proxyMedia(playUrl);
       video.controls = true;
       video.autoplay = true;
-      video.style.width = '100%';
-      video.style.maxHeight = '70vh';
+      // Fit by HEIGHT, not width: a portrait video at width:100% grows taller
+      // than the modal and its controls bar gets clipped. Constraining both
+      // dimensions (auto size, preserve aspect) keeps the whole player — controls
+      // included — visible for any aspect ratio.
+      video.style.maxWidth = '100%';
+      video.style.maxHeight = '68vh';
+      video.style.width = 'auto';
+      video.style.height = 'auto';
       dom.previewBody.appendChild(video);
     } else if (item.thumbnail) {
       // No streamable video URL (Instagram scraping gives thumbnails only).
