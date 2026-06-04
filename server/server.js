@@ -1787,41 +1787,44 @@ app.post('/api/search', async (req, res) => {
       // because TikWM's cursor windows occasionally overlap, especially for
       // popular queries.
       //
-      // Relevance RANKING (TikTok-style) instead of a hard keep/drop. TikTok's
-      // own search doesn't filter — it orders results by closeness: exact matches
-      // first, looser ones after. We do the same: a video must share at least one
-      // query token to enter (drops the totally-unrelated tail), then we score it
-      // by how many tokens it matches and sort best-first. So "calvin klein boxer"
-      // hits sit on top, and broader single-word hits trail below — lots of
-      // results, but the accurate ones lead.
+      // TikTok-style: trust TikWM's own relevance order (it already understands
+      // that English "Calvin Klein"/"CK" matches an Arabic query), keep what it
+      // returns, and drop only empty generic-tag spam (#fyp #foryou …). We still
+      // RANK so that videos whose text actually contains the query words float to
+      // the top, with everything else (incl. English matches TikTok surfaced)
+      // below. Matching is spelling-tolerant: long vowels are stripped so
+      // كلفين/كيلفين/كلين/كلاين all count as the same word.
       const qTokens = normalizeArabic(query).split(' ').filter((t) => t.length >= 2);
       const qNorm = normalizeArabic(query).trim();
-      // Accuracy-first gate: a video must match a MAJORITY (~60%) of the query
-      // tokens to enter, so a single ambiguous word ("بوكسر" = boxer/boxing/dog)
-      // is NOT enough on a multi-word query. Among those that pass, ranking still
-      // puts the closest first. Fewer-but-on-topic instead of a loose junk tail.
-      const entryThreshold = qTokens.length ? Math.max(1, Math.ceil(qTokens.length * 0.6)) : 0;
-      const scoreOf = (v) => {
-        if (!qTokens.length) return 1;
-        const hay = normalizeArabic(
-          `${v.title || ''} ${v.author?.nickname || ''} ${v.author?.unique_id || ''}`
-        );
-        let hits = 0;
-        for (const t of qTokens) if (hay.includes(t)) hits++;
-        // Strong bonus when the full phrase appears verbatim — the most exact hit.
-        if (qNorm && hay.includes(qNorm)) hits += qTokens.length;
-        return hits;
+      const skel = (s) => s.replace(/[اوي]/g, ''); // collapse Arabic long vowels
+      const qSkel = qTokens.map(skel).filter((t) => t.length >= 2);
+      // Generic spam tags: a post that is ONLY these (no real words) is junk.
+      const SPAM_TAGS = new Set([
+        'fyp', 'foryou', 'foryoupage', 'fory', 'foru', 'for', 'viral', 'viraltiktok',
+        'viralvideo', 'trending', 'tranding', 'trend', 'trends', 'relatable', 'explore',
+        'duet', 'capcut', 'tiktok', 'tiktokshop', 'funny', 'famous', 'makemefamouse',
+        'ترند', 'اكسبلور', 'الشعب', 'الصيني', 'حل', 'ضحك', 'فوريو', 'خلفيات', 'تيك', 'توك',
+      ]);
+      const evalVideo = (v) => {
+        const norm = normalizeArabic(`${v.title || ''} ${v.author?.nickname || ''}`);
+        const skHay = skel(norm);
+        let score = 0;
+        for (const t of qSkel) if (skHay.includes(t)) score++;
+        if (qNorm && norm.includes(qNorm)) score += qSkel.length; // verbatim phrase bonus
+        // Real (non-spam) words let TikTok's own relevant hits through even with
+        // zero Arabic token match (e.g. "Calvin Klein boxer" written in English).
+        const realWords = norm.split(' ').filter((w) => w.length >= 2 && !SPAM_TAGS.has(w));
+        return { keep: score > 0 || realWords.length >= 2, score };
       };
 
       const out = [];
       const seenIds = new Set();
       let cursor = '0';
-      let driftPages = 0; // consecutive pages that added nothing relevant
+      let emptyPages = 0; // consecutive pages that kept nothing
       const start = Date.now();
-      // Bigger budget for unlimited requests — TikWM pages slowly.
-      const TIME_BUDGET_MS = Number.isFinite(safeCount) ? 90_000 : 600_000;
-      // Collect beyond safeCount so the ranking has room to surface the best.
-      const COLLECT_CAP = Number.isFinite(safeCount) ? safeCount * 2 : Infinity;
+      const TIME_BUDGET_MS = Number.isFinite(safeCount) ? 90_000 : 120_000;
+      // Cap so an "unlimited" search doesn't crawl forever; plenty of breadth.
+      const COLLECT_CAP = Number.isFinite(safeCount) ? safeCount * 2 : 300;
       while (out.length < COLLECT_CAP && (Date.now() - start) < TIME_BUDGET_MS) {
         let data;
         try {
@@ -1832,15 +1835,15 @@ app.post('/api/search', async (req, res) => {
         } catch { break; }
         const videos = data?.data?.videos || [];
         if (!videos.length) break;
-        let addedThisPage = 0; // relevant videos pushed this page
-        let newThisPage = 0;   // de-duped new videos seen this page
+        let keptThisPage = 0;
+        let newThisPage = 0;
         for (const v of videos) {
           const vid = v.video_id || v.id;
           if (!vid || seenIds.has(vid)) continue;
           seenIds.add(vid);
           newThisPage++;
-          const score = scoreOf(v);
-          if (score < entryThreshold) continue; // not enough query words → off-topic
+          const { keep, score } = evalVideo(v);
+          if (!keep) continue; // empty generic-tag spam
           out.push({
             id: vid, title: v.title,
             thumbnail: v.cover || v.origin_cover,
@@ -1851,21 +1854,18 @@ app.post('/api/search', async (req, res) => {
             downloadUrl: v.play, hdDownloadUrl: v.hdplay,
             _score: score,
           });
-          addedThisPage++;
+          keptThisPage++;
           if (out.length >= COLLECT_CAP) break;
         }
         if (!data.data.hasMore) break;
-        // If a whole page added nothing NEW (all duplicates), TikWM is stuck on
-        // the same window — bail rather than spin forever.
-        if (newThisPage === 0) break;
-        // Once results stop being relevant for a few pages in a row, TikWM has
-        // drifted off-topic — stop instead of collecting unrelated videos.
-        if (addedThisPage === 0) { if (++driftPages >= 6) break; }
-        else driftPages = 0;
+        if (newThisPage === 0) break; // TikWM stuck on a duplicate window
+        if (keptThisPage === 0) { if (++emptyPages >= 6) break; }
+        else emptyPages = 0;
         cursor = String(data.data.cursor || '');
         if (!cursor || cursor === '0') break;
       }
-      // Rank best-first: most query-tokens matched, then most-viewed as tiebreak.
+      // Rank: text that contains the query words first, then by views. Keeps the
+      // exact matches on top while still returning the broad TikTok-style set.
       out.sort((a, b) => (b._score - a._score) || ((b.playCount || 0) - (a.playCount || 0)));
       const ranked = (Number.isFinite(safeCount) ? out.slice(0, safeCount) : out)
         .map(({ _score, ...rest }) => rest);
