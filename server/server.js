@@ -1787,24 +1787,25 @@ app.post('/api/search', async (req, res) => {
       // because TikWM's cursor windows occasionally overlap, especially for
       // popular queries.
       //
-      // Relevance filter: TikWM ranks the first pages well but drifts into
-      // loosely-related content on deeper cursors (general "books"/"reading"
-      // clips, ads, off-topic videos). We keep only videos whose text matches
-      // a majority of the query's significant tokens, so "all results" means
-      // "all RELEVANT results" instead of a long junk tail.
+      // Relevance RANKING (TikTok-style) instead of a hard keep/drop. TikTok's
+      // own search doesn't filter — it orders results by closeness: exact matches
+      // first, looser ones after. We do the same: a video must share at least one
+      // query token to enter (drops the totally-unrelated tail), then we score it
+      // by how many tokens it matches and sort best-first. So "calvin klein boxer"
+      // hits sit on top, and broader single-word hits trail below — lots of
+      // results, but the accurate ones lead.
       const qTokens = normalizeArabic(query).split(' ').filter((t) => t.length >= 2);
-      // Looser relevance: require only ~40% of the query tokens to match (min 1).
-      // Brings in many more near-matches — closer to TikTok's own broad results —
-      // while still cutting the totally-unrelated tail.
-      const required = qTokens.length ? Math.max(1, Math.floor(qTokens.length * 0.4)) : 0;
-      const isRelevant = (v) => {
-        if (!required) return true;
+      const qNorm = normalizeArabic(query).trim();
+      const scoreOf = (v) => {
+        if (!qTokens.length) return 1;
         const hay = normalizeArabic(
           `${v.title || ''} ${v.author?.nickname || ''} ${v.author?.unique_id || ''}`
         );
         let hits = 0;
         for (const t of qTokens) if (hay.includes(t)) hits++;
-        return hits >= required;
+        // Strong bonus when the full phrase appears verbatim — the most exact hit.
+        if (qNorm && hay.includes(qNorm)) hits += qTokens.length;
+        return hits;
       };
 
       const out = [];
@@ -1814,7 +1815,9 @@ app.post('/api/search', async (req, res) => {
       const start = Date.now();
       // Bigger budget for unlimited requests — TikWM pages slowly.
       const TIME_BUDGET_MS = Number.isFinite(safeCount) ? 90_000 : 600_000;
-      while (out.length < safeCount && (Date.now() - start) < TIME_BUDGET_MS) {
+      // Collect beyond safeCount so the ranking has room to surface the best.
+      const COLLECT_CAP = Number.isFinite(safeCount) ? safeCount * 2 : Infinity;
+      while (out.length < COLLECT_CAP && (Date.now() - start) < TIME_BUDGET_MS) {
         let data;
         try {
           data = await apiRequest('https://www.tikwm.com/api/feed/search', {
@@ -1831,7 +1834,8 @@ app.post('/api/search', async (req, res) => {
           if (!vid || seenIds.has(vid)) continue;
           seenIds.add(vid);
           newThisPage++;
-          if (!isRelevant(v)) continue;
+          const score = scoreOf(v);
+          if (score <= 0) continue; // shares no query word → totally unrelated
           out.push({
             id: vid, title: v.title,
             thumbnail: v.cover || v.origin_cover,
@@ -1840,9 +1844,10 @@ app.post('/api/search', async (req, res) => {
             playCount: v.play_count,
             url: `https://www.tiktok.com/@${v.author?.unique_id}/video/${vid}`,
             downloadUrl: v.play, hdDownloadUrl: v.hdplay,
+            _score: score,
           });
           addedThisPage++;
-          if (out.length >= safeCount) break;
+          if (out.length >= COLLECT_CAP) break;
         }
         if (!data.data.hasMore) break;
         // If a whole page added nothing NEW (all duplicates), TikWM is stuck on
@@ -1855,7 +1860,11 @@ app.post('/api/search', async (req, res) => {
         cursor = String(data.data.cursor || '');
         if (!cursor || cursor === '0') break;
       }
-      return res.json({ platform: 'tiktok', results: out });
+      // Rank best-first: most query-tokens matched, then most-viewed as tiebreak.
+      out.sort((a, b) => (b._score - a._score) || ((b.playCount || 0) - (a.playCount || 0)));
+      const ranked = (Number.isFinite(safeCount) ? out.slice(0, safeCount) : out)
+        .map(({ _score, ...rest }) => rest);
+      return res.json({ platform: 'tiktok', results: ranked });
     }
 
     if (plat === 'youtube' || !plat) {
