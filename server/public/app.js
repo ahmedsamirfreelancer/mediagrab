@@ -57,6 +57,7 @@
     downloadBtn: $('#download-btn'),
     searchInput: $('#search-input'),
     searchBtn: $('#search-btn'),
+    imgSearchBtn: $('#img-search-btn'),
     searchSection: $('#search-section'),
     countBtn: $('#count-btn'),
     countResult: $('#count-result'),
@@ -2603,6 +2604,61 @@
     });
     dom.searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); dom.searchBtn.click(); }
+    });
+
+    // ─── Reverse image search (paste a product screenshot) ───────────────
+    // Upload the image to Google Lens (via Electron main) and open the
+    // results page so the user can read the product's English name, then
+    // search that name above to pull videos/images.
+    async function reverseImageSearch(blob) {
+      if (!window.electronAPI?.image) {
+        return toast('البحث بالصورة متاح في تطبيق سطح المكتب فقط', 'warning');
+      }
+      if (!blob || !blob.size) {
+        return toast('مفيش صورة. انسخ صورة المنتج الأول', 'warning');
+      }
+      toast('بنرفع الصورة ونفتح جوجل في المتصفح…', 'info', 8000);
+      try {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const r = await window.electronAPI.image.reverseSearch(bytes, blob.type || 'image/png');
+        if (r?.success) {
+          toast('فتحنا نتيجة جوجل في المتصفح — هتلاقي اسم المنتج بالإنجليزي، انسخه وابحث بيه فوق', 'success', 7000);
+        } else {
+          toast('فشل البحث بالصورة: ' + (r?.error || 'خطأ غير معروف'), 'error');
+        }
+      } catch (e) {
+        toast('فشل قراءة الصورة من الحافظة', 'error');
+      }
+    }
+
+    // Ctrl+V anywhere with an image in the clipboard → reverse search.
+    document.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.type && it.type.startsWith('image/')) {
+          const blob = it.getAsFile();
+          if (blob) { e.preventDefault(); reverseImageSearch(blob); return; }
+        }
+      }
+      // No image → let the normal text paste proceed untouched.
+    });
+
+    // Button: pull the image straight from the clipboard (no focus needed).
+    dom.imgSearchBtn?.addEventListener('click', async () => {
+      if (!navigator.clipboard?.read) {
+        return toast('انسخ صورة المنتج ثم اضغط Ctrl+V', 'info');
+      }
+      try {
+        const items = await navigator.clipboard.read();
+        for (const it of items) {
+          const type = it.types.find((t) => t.startsWith('image/'));
+          if (type) { reverseImageSearch(await it.getType(type)); return; }
+        }
+        toast('مفيش صورة في الحافظة. انسخ صورة المنتج (أو استخدم Ctrl+V)', 'warning');
+      } catch {
+        toast('انسخ صورة المنتج ثم اضغط Ctrl+V في أي مكان', 'info');
+      }
     });
 
     dom.selectAllBtn.addEventListener('click', () => {

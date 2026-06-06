@@ -207,6 +207,84 @@ ipcMain.handle('shell:openPath', async (_evt, filePath) => {
   }
 });
 
+/* ─── Reverse image search (Google Lens) ─────────────────────────────────
+ * User pastes a product screenshot (Ctrl+V); we upload the raw bytes to
+ * Google Lens' upload endpoint, which answers with a 303 redirect to the
+ * visual-search results page. We open that page in the user's default
+ * browser so they can read the product's English name, then search it here.
+ *
+ * The old www.google.com/searchbyimage/upload endpoint is dead (returns 500);
+ * lens.google.com/v3/upload is the current one and needs the image under the
+ * multipart field name "encoded_image".
+ */
+// Upload the image to a temporary public host so Google can fetch it by URL.
+// litterbox auto-deletes the file after 1 hour, so the screenshot only lives
+// publicly for the short window needed to run the search.
+function uploadToLitterbox(buffer, mime) {
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    const boundary = '----MediaGrabLB' + Date.now();
+    const ext = /png/i.test(mime || '') ? 'png'
+              : /webp/i.test(mime || '') ? 'webp'
+              : 'jpg';
+    const textField = (name, val) => Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${val}\r\n`, 'utf8');
+    const fileHead = Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="fileToUpload"; filename="image.${ext}"\r\n` +
+      `Content-Type: ${mime || 'image/png'}\r\n\r\n`, 'utf8');
+    const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+    const body = Buffer.concat([
+      textField('reqtype', 'fileupload'),
+      textField('time', '1h'),
+      fileHead, buffer, tail,
+    ]);
+
+    const req = https.request({
+      hostname: 'litterbox.catbox.moe',
+      path: '/resources/internals/api.php',
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length,
+        'User-Agent': 'MediaGrab',
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => {
+        const url = (data || '').trim();
+        if (/^https?:\/\//i.test(url)) resolve(url);
+        else reject(new Error('فشل رفع الصورة: ' + url.slice(0, 120)));
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error('انتهى وقت رفع الصورة')));
+    req.write(body);
+    req.end();
+  });
+}
+
+ipcMain.handle('image:reverseSearch', async (_evt, bytes, mime) => {
+  try {
+    const buffer = Buffer.from(bytes);
+    if (!buffer.length) return { success: false, error: 'الصورة فاضية' };
+
+    // 1) Host the image temporarily so Google can fetch it.
+    const publicUrl = await uploadToLitterbox(buffer, mime);
+
+    // 2) Let the user's real browser run the Lens search BY URL. The browser
+    //    handles the full redirect/cookie chain itself, so results render
+    //    normally with no "not associated with your account" / 403 errors.
+    const searchUrl = 'https://lens.google.com/uploadbyurl?url='
+      + encodeURIComponent(publicUrl) + '&hl=en';
+    await shell.openExternal(searchUrl);
+    return { success: true, url: searchUrl };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 /* TikTok user URLs now go through yt-dlp in server.js — no Electron-side
  * scraper/bridge/login needed. yt-dlp uses TikTok's real pagination API and
  * pulls full profiles in one pass without authentication. */

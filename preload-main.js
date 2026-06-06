@@ -26,6 +26,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cookies: {
     import: (platform) => ipcRenderer.invoke('cookies:import', platform),
   },
+  // Reverse image search — paste a product screenshot, get its Google Lens
+  // results page opened in the default browser to read the English name.
+  image: {
+    reverseSearch: (bytes, mime) => ipcRenderer.invoke('image:reverseSearch', bytes, mime),
+  },
   // License info (read-only; activation happens at the gate before this window opens)
   license: {
     getStatus: () => ipcRenderer.invoke('license:getStatus'),
