@@ -113,6 +113,32 @@ const { ipcRenderer } = require('electron');
     return 'background:' + bg + ';color:#fff;border:none;border-radius:8px;padding:7px 13px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;';
   }
 
+  // Make room for our fixed toolbar. body paddingTop handles normal-flow
+  // content, but TikTok's own top nav/search bar is position:fixed/sticky at
+  // top:0 — padding doesn't move it, so it hides under our toolbar. Bump every
+  // top-anchored fixed/sticky element down by the toolbar height too. Runs on
+  // every tick (idempotent via data attrs) so it survives TikTok re-renders.
+  function pushPageDown() {
+    try {
+      const bar = document.getElementById('mg-toolbar');
+      if (!bar || !document.body) return;
+      const h = bar.offsetHeight + 6;
+      document.body.style.paddingTop = h + 'px';
+      for (const el of document.querySelectorAll('body *')) {
+        if (el.id === 'mg-toolbar' || el.closest('#mg-toolbar')) continue;
+        const cs = getComputedStyle(el);
+        if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+        const top = parseFloat(cs.top);
+        if (!isFinite(top) || top > 80) continue; // only near-top anchored bars
+        const base = el.dataset.mgBaseTop !== undefined
+          ? parseFloat(el.dataset.mgBaseTop) : top;
+        el.dataset.mgBaseTop = base;
+        const want = (base + h) + 'px';
+        if (el.style.top !== want) el.style.top = want;
+      }
+    } catch {}
+  }
+
   function injectToolbar() {
     if (document.getElementById('mg-toolbar')) return;
     if (!document.body) return;
@@ -228,9 +254,8 @@ const { ipcRenderer } = require('electron');
     (document.body || document.documentElement).appendChild(bar);
 
     // Push the page down by the toolbar's real height (two rows, may wrap).
-    const setPad = () => { try { document.body.style.paddingTop = (bar.offsetHeight + 6) + 'px'; } catch {} };
-    setPad();
-    setTimeout(setPad, 400);
+    pushPageDown();
+    setTimeout(pushPageDown, 400);
 
     // Fetch the base output dir, then render "base\" before the folder input.
     ipcRenderer.invoke('tiktok-embed:baseDir').then((b) => { baseDir = b || ''; renderBasePath(); }).catch(() => {});
@@ -299,6 +324,7 @@ const { ipcRenderer } = require('electron');
     try {
       injectStyle();
       injectToolbar();
+      pushPageDown();
       // When a video is open the path leaves /search → hide all grid buttons so
       // they never bleed over TikTok's video modal.
       const onVideo = /\/@[^/]+\/video\/\d+/.test(location.pathname);
