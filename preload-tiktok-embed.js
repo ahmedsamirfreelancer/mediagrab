@@ -130,10 +130,10 @@ const { ipcRenderer } = require('electron');
         if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
         const top = parseFloat(cs.top);
         if (!isFinite(top) || top > 80) continue; // only near-top anchored bars
-        const base = el.dataset.mgBaseTop !== undefined
-          ? parseFloat(el.dataset.mgBaseTop) : top;
-        el.dataset.mgBaseTop = base;
-        const want = (base + h) + 'px';
+        // Pin every top-anchored bar to exactly our toolbar height — NOT
+        // base+h, which over-pushes bars TikTok already offset (e.g. the
+        // Top/Users/Videos tabs), leaving a gap with videos peeking above them.
+        const want = h + 'px';
         if (el.style.top !== want) el.style.top = want;
       }
     } catch {}
