@@ -477,7 +477,11 @@ function sanitizeFilename(name) {
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
     .replace(/\s+/g, ' ')
     .trim()
-    .substring(0, 80) || 'video';
+    .substring(0, 80)
+    // Windows can't create/delete names ending in a dot or space (and the
+    // product name often ends in "…"), which leaves un-deletable folders.
+    .replace(/[. ]+$/, '')
+    .trim() || 'video';
 }
 
 function isHttpUrl(s) {
@@ -749,6 +753,14 @@ function downloadFile(fileUrl, destBase, downloadId, title) {
       if (entry) { entry.request = req; entry.fileStream = fileStream; }
 
       res.on('data', (chunk) => {
+        // Abort the moment the user cancels — without this, a fast TikTok
+        // download finishes before cancel-all's destroy() takes effect.
+        if (entry && entry.cancelled) {
+          try { req.destroy(); } catch {}
+          try { fileStream.destroy(); } catch {}
+          reject(new Error('Cancelled'));
+          return;
+        }
         receivedBytes += chunk.length;
         const now = Date.now();
         if (now - lastEmit > 250) {
@@ -1243,6 +1255,7 @@ app.post('/api/download', async (req, res) => {
       customArgs = '',
       subfolder = '',
       autoRetry = 2,        // try up to N extra times on failure
+      ignoreGlobalDedupe = false, // bypass cross-session dedupe (per-product folders)
     } = req.body || {};
 
     if (!targetUrl && (!Array.isArray(selectedVideos) || selectedVideos.length === 0)) {
@@ -1360,6 +1373,7 @@ app.post('/api/download', async (req, res) => {
               outputDir, plat, quality, filenameTemplate,
               skipExisting, organizeByAuthor, subfolder,
               speedLimitKBps, downloadSubs, cookiesFile, customArgs,
+              ignoreGlobalDedupe,
             });
             return; // success
           } catch (err) {
@@ -1401,6 +1415,7 @@ async function runDownloadOnce(task, entry, ctx) {
     outputDir, plat, quality, filenameTemplate,
     skipExisting, organizeByAuthor, subfolder,
     speedLimitKBps, downloadSubs, cookiesFile, customArgs,
+    ignoreGlobalDedupe,
   } = ctx;
 
   emitProgress(task.id, { title: task.title, progress: 0, speed: '', status: 'downloading' });
@@ -1428,8 +1443,9 @@ async function runDownloadOnce(task, entry, ctx) {
     ensureDir(taskOutputDir);
   }
 
-  // Cross-session dedupe
-  if (skipExisting) {
+  // Cross-session dedupe (skipped for per-product folder downloads so the
+  // same video can live in each product's folder).
+  if (skipExisting && !ignoreGlobalDedupe) {
     const vid = extractVideoId(task);
     const prior = isAlreadyDownloaded(plat, vid);
     if (prior && fs.existsSync(prior.filePath)) {
@@ -1458,7 +1474,6 @@ async function runDownloadOnce(task, entry, ctx) {
       }
     }
     const videoUrl = task.hdDownloadUrl || task.downloadUrl;
-    if (!videoUrl) throw new Error('فشل الحصول على رابط التحميل من TikWM');
 
     // Skip-if-exists: filenames are now unique per video (title-derived), so
     // a same-named file in the target folder really IS this video. Either the
@@ -1481,21 +1496,44 @@ async function runDownloadOnce(task, entry, ctx) {
       return;
     }
 
-    // uniquePath stays as a final guard against rare title collisions
-    // between two genuinely different videos.
-    const destBase = uniquePath(path.join(taskOutputDir, filenameBase + '.mp4'));
-    try {
-      filePath = await downloadFile(videoUrl, destBase, task.id, task.title);
-    } catch (dlErr) {
-      if (entry.cancelled) throw new Error('Cancelled');
-      const freshInfo = await tikwmGetVideo(task.url);
-      if (!freshInfo || (!freshInfo.play && !freshInfo.hdplay)) throw dlErr;
-      filePath = await downloadFile(freshInfo.hdplay || freshInfo.play, destBase, task.id, task.title);
+    // yt-dlp fallback — handles TikTok Shop / gated videos TikWM can't resolve,
+    // and prevents one failure from looping slow TikWM retries (limiter pile-up).
+    const ttYtdlpFallback = () => {
+      const ttCookies = path.join(process.env.MEDIAGRAB_DATA_DIR || '', 'tiktok-cookies.txt');
+      const ck = fs.existsSync(ttCookies) ? ttCookies : (cookiesFile || '');
+      return ytdlpDownload(task.url, taskOutputDir, task.id, task.title, quality, filenameBase, {
+        speedLimitKBps, downloadSubs, cookiesFile: ck, customArgs, taskQuality: task.quality,
+      });
+    };
+
+    if (!videoUrl) {
+      // TikWM couldn't resolve it (e.g. TikTok Shop video) → let yt-dlp try.
+      filePath = await ttYtdlpFallback();
+    } else {
+      // uniquePath stays as a final guard against rare title collisions.
+      const destBase = uniquePath(path.join(taskOutputDir, filenameBase + '.mp4'));
+      try {
+        filePath = await downloadFile(videoUrl, destBase, task.id, task.title);
+      } catch (dlErr) {
+        if (entry.cancelled) throw new Error('Cancelled');
+        try {
+          const freshInfo = await tikwmGetVideo(task.url);
+          if (freshInfo && (freshInfo.play || freshInfo.hdplay)) {
+            filePath = await downloadFile(freshInfo.hdplay || freshInfo.play, destBase, task.id, task.title);
+          } else {
+            filePath = await ttYtdlpFallback();
+          }
+        } catch (e2) {
+          if (entry.cancelled) throw new Error('Cancelled');
+          filePath = await ttYtdlpFallback(); // last resort
+        }
+      }
     }
 
     // Audio-only mode: TikWM gives us video; convert to MP3 with ffmpeg and
-    // discard the source .mp4 so the user gets exactly what the 🎵 button promised.
-    if (quality === 'audio') {
+    // discard the source .mp4. (yt-dlp's audio path already yields audio, so
+    // only convert when we actually got an .mp4 from downloadFile.)
+    if (quality === 'audio' && /\.mp4$/i.test(filePath)) {
       const mp3Path = uniquePath(filePath.replace(/\.mp4$/i, '.mp3'));
       emitProgress(task.id, { title: task.title, progress: 99, speed: '', status: 'downloading', eta: 'converting' });
       await extractAudioToMp3(filePath, mp3Path);
@@ -2286,6 +2324,29 @@ app.get('/api/disk-space', (req, res) => {
   }
 });
 
+// POST /api/next-subfolder — return the next free auto-numbered folder name
+// inside a base dir (1, 2, 3, …), skipping names that already exist. Used by
+// the batch downloader when the user leaves the folder name blank.
+app.post('/api/next-subfolder', (req, res) => {
+  try {
+    const base = validateOutputDir(req.body?.outputDir);
+    ensureDir(base);
+    const prefix = typeof req.body?.prefix === 'string' ? req.body.prefix : '';
+    let n = 1;
+    // Cap the scan so a malformed request can't spin forever.
+    while (n < 100000) {
+      const name = `${prefix}${n}`;
+      if (!fs.existsSync(path.join(base, sanitizeFilename(name)))) {
+        return res.json({ name });
+      }
+      n++;
+    }
+    res.status(500).json({ error: 'No free folder name found' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // GET /api/results — load last saved results
 app.get('/api/results', (req, res) => {
   try {
@@ -2315,8 +2376,17 @@ app.get('/api/downloaded-ids', (req, res) => {
   res.json({ all });
 });
 
-// DELETE /api/downloaded-ids — clear the dedupe DB
+// DELETE /api/downloaded-ids[?platform=tiktok] — clear the dedupe DB, or just
+// one platform's IDs (used by the TikTok window's "reset marks" button).
 app.delete('/api/downloaded-ids', (req, res) => {
+  const plat = (req.query.platform || '').toLowerCase();
+  if (plat) {
+    const all = loadDownloadedIds();
+    delete all[plat];
+    downloadedIdsCache = all;
+    try { atomicWrite(DOWNLOADED_IDS_FILE, all); } catch {}
+    return res.json({ success: true, platform: plat });
+  }
   downloadedIdsCache = {};
   try { atomicWrite(DOWNLOADED_IDS_FILE, {}); } catch {}
   res.json({ success: true });
@@ -2405,7 +2475,9 @@ app.post('/api/cancel-all', (req, res) => {
 app.post('/api/cancel/:id', (req, res) => {
   const { id } = req.params;
   const entry = activeDownloads.get(id);
-  if (!entry) return res.status(404).json({ error: 'Download not found or already finished' });
+  // Already finished/removed → nothing to cancel, but treat as success so the
+  // UI doesn't flash a scary "فشل إلغاء التحميل" for a download that's done.
+  if (!entry) return res.json({ success: true, alreadyDone: true });
 
   entry.cancelled = true;
 

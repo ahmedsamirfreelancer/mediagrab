@@ -447,7 +447,7 @@
 
   // Batch download — pre-create queue items with IDs we control,
   // then send those exact IDs to the server so progress events match.
-  async function startBatchDownload(items) {
+  async function startBatchDownload(items, opts = {}) {
     if (!items.length) return;
 
     // Disk-space sanity check for big batches
@@ -500,7 +500,7 @@
         url: enriched[0]?.url || '',
         selectedVideos: enriched,
         quality: state.settings.quality,
-        outputDir: state.settings.outputDir,
+        outputDir: opts.outputDir || state.settings.outputDir,
         filenameTemplate: state.settings.filenameTemplate,
         concurrent: state.settings.concurrent,
         skipExisting: state.settings.skipExisting,
@@ -509,7 +509,8 @@
         downloadSubs: state.settings.downloadSubs,
         cookiesFile: state.settings.cookiesFile,
         customArgs: state.settings.customArgs,
-        subfolder: getCurrentSubfolder(),
+        subfolder: opts.subfolder !== undefined ? opts.subfolder : getCurrentSubfolder(),
+        ignoreGlobalDedupe: opts.ignoreGlobalDedupe || false,
       });
       toast(`بدء ${enriched.length} تحميل`, 'info');
     } catch (err) {
@@ -552,6 +553,16 @@
           platform: 'instagram',
         }));
         handleSearchResult({ platform: 'instagram', mode: 'page-scrape', results });
+        return;
+      }
+
+      // TikTok: open the REAL tiktok.com search in a window with download
+      // buttons on every video — exact same results as the site, and nothing
+      // gets pulled into the in-app grid.
+      if (state.platform === 'tiktok' && window.electronAPI?.tiktok?.openSearchWindow) {
+        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        window.electronAPI.tiktok.openSearchWindow(payload.query, base);
+        toast('فتحنا تيك توك — دوس «تحميل» على أي فيديو', 'info', 5000);
         return;
       }
 
@@ -2118,6 +2129,18 @@
       fbBanner.style.display = showBanner ? 'flex' : 'none';
       if (showBanner) refreshFacebookLoginStatus();
     }
+    // Show/hide TikTok login banner.
+    const ttBanner = document.getElementById('tiktok-login-banner');
+    if (ttBanner) {
+      const showBanner = platform === 'tiktok' && !!window.electronAPI?.tiktok;
+      ttBanner.style.display = showBanner ? 'flex' : 'none';
+      if (showBanner) refreshTiktokLoginStatus();
+    }
+    // Show/hide the "open TikTok in a window" button (Electron only).
+    const ttEmbedRow = document.getElementById('tiktok-embed-row');
+    if (ttEmbedRow) {
+      ttEmbedRow.style.display = (platform === 'tiktok' && !!window.electronAPI?.tiktok?.openSearchWindow) ? 'block' : 'none';
+    }
 
     // Per-platform isolation: each tab keeps its own results, context, and
     // search query. Switching tabs swaps everything so the user only sees
@@ -2291,6 +2314,30 @@
     } catch (e) { /* ignore */ }
   }
 
+  async function refreshTiktokLoginStatus() {
+    if (!window.electronAPI?.tiktok) return;
+    const statusEl = document.getElementById('tiktok-login-status');
+    const loginBtn = document.getElementById('tiktok-login-btn');
+    const logoutBtn = document.getElementById('tiktok-logout-btn');
+    if (!statusEl) return;
+    try {
+      const { loggedIn, cookiesFile } = await window.electronAPI.tiktok.status();
+      if (loggedIn) {
+        statusEl.textContent = 'مسجل دخول TikTok ✓';
+        if (loginBtn) loginBtn.textContent = 'إعادة تسجيل دخول';
+        if (logoutBtn) logoutBtn.style.display = '';
+      } else if (cookiesFile) {
+        statusEl.textContent = 'كوكيز مستوردة ✓ — جاهز للبحث';
+        if (loginBtn) loginBtn.textContent = 'تسجيل دخول TikTok';
+        if (logoutBtn) logoutBtn.style.display = '';
+      } else {
+        statusEl.textContent = 'مش مسجل دخول (البحث بيشتغل برضه)';
+        if (loginBtn) loginBtn.textContent = 'تسجيل دخول TikTok';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   function bindCookieImportButtons() {
     function wireImport(btnId, platform, onDone) {
       const btn = document.getElementById(btnId);
@@ -2317,6 +2364,7 @@
     }
     wireImport('ig-import-btn', 'instagram', refreshInstagramLoginStatus);
     wireImport('fb-import-btn', 'facebook', refreshFacebookLoginStatus);
+    wireImport('tiktok-import-btn', 'tiktok', refreshTiktokLoginStatus);
   }
 
   function bindFacebookLoginButtons() {
@@ -2346,6 +2394,168 @@
         await window.electronAPI.facebook.logout();
         toast('تم تسجيل الخروج', 'info');
         refreshFacebookLoginStatus();
+      });
+    }
+  }
+
+  function bindTiktokLoginButtons() {
+    const loginBtn = document.getElementById('tiktok-login-btn');
+    const logoutBtn = document.getElementById('tiktok-logout-btn');
+    const autoBtn = document.getElementById('tiktok-autobrowser-btn');
+    if (autoBtn) {
+      autoBtn.addEventListener('click', async () => {
+        if (!window.electronAPI?.tiktok?.cookiesFromBrowser) return;
+        autoBtn.disabled = true;
+        const original = autoBtn.textContent;
+        autoBtn.textContent = 'بيسحب من المتصفح...';
+        try {
+          const r = await window.electronAPI.tiktok.cookiesFromBrowser();
+          if (r?.success) {
+            toast(`اتسحب الدخول من ${r.browser} ✓ — جاهز للبحث`, 'success', 6000);
+          } else if (r?.hint === 'app-bound' || /DPAPI|decrypt/i.test(r?.error || '')) {
+            toast('Chrome/Edge بيشفّر الكوكيز ومينفعش نقراها تلقائي. الحل: «تسجيل دخول TikTok» يدوي مرة (بالباسورد أو QR)، أو استخدم Firefox، أو «استيراد كوكيز». بس جرّب تبحث الأول — غالباً مش محتاج تسجيل أصلاً.', 'warning', 12000);
+          } else {
+            toast(r?.error || 'مقدرناش نسحب الدخول. جرّب تبحث من غير تسجيل', 'error', 8000);
+          }
+        } catch (e) {
+          toast(e?.message || 'فشل السحب من المتصفح', 'error');
+        } finally {
+          autoBtn.disabled = false;
+          autoBtn.textContent = original;
+          refreshTiktokLoginStatus();
+        }
+      });
+    }
+    if (loginBtn) {
+      loginBtn.addEventListener('click', async () => {
+        if (!window.electronAPI?.tiktok) return;
+        loginBtn.disabled = true;
+        loginBtn.textContent = 'جاري الفتح...';
+        try {
+          const res = await window.electronAPI.tiktok.login();
+          if (res?.success) toast('تم تسجيل الدخول بنجاح', 'success');
+          else toast('لم يتم تسجيل الدخول', 'warning');
+        } catch (e) {
+          toast(e?.message || 'خطأ في فتح نافذة تسجيل الدخول', 'error');
+        } finally {
+          loginBtn.disabled = false;
+          refreshTiktokLoginStatus();
+        }
+      });
+    }
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', async () => {
+        if (!window.electronAPI?.tiktok) return;
+        if (!confirm('تسجيل خروج TikTok؟')) return;
+        await window.electronAPI.tiktok.logout();
+        toast('تم تسجيل الخروج', 'info');
+        refreshTiktokLoginStatus();
+      });
+    }
+  }
+
+  // ─── Batch download (paste many links → one folder) ──────────────────
+  const BATCH_DEFAULT_DIR = 'E:\\منتجات التست';
+
+  function parseBatchLinks(text) {
+    return (text || '').split(/[\s,;\n]+/).map((s) => s.trim()).filter(isValidUrl);
+  }
+
+  function bindBatchModal() {
+    const modal = document.getElementById('batch-modal');
+    const openBtn = document.getElementById('batch-btn');
+    const closeBtn = document.getElementById('batch-close');
+    const linksEl = document.getElementById('batch-links');
+    const folderEl = document.getElementById('batch-folder');
+    const subfolderEl = document.getElementById('batch-subfolder');
+    const countHint = document.getElementById('batch-count-hint');
+    const pasteBtn = document.getElementById('batch-paste');
+    const dlBtn = document.getElementById('batch-download');
+    if (!modal || !openBtn) return;
+
+    const updateCount = () => {
+      const n = parseBatchLinks(linksEl?.value).length;
+      if (countHint) countHint.textContent = `${n} رابط صالح`;
+    };
+    const close = () => modal.classList.add('hidden');
+    const open = () => {
+      if (folderEl && !folderEl.value.trim()) {
+        let last = '';
+        try { last = localStorage.getItem('mediagrab_batch_dir') || ''; } catch {}
+        folderEl.value = last || BATCH_DEFAULT_DIR;
+      }
+      updateCount();
+      modal.classList.remove('hidden');
+      linksEl?.focus();
+    };
+
+    openBtn.addEventListener('click', open);
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    if (linksEl) linksEl.addEventListener('input', updateCount);
+
+    if (pasteBtn) pasteBtn.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && linksEl) {
+          linksEl.value = (linksEl.value.trim() ? linksEl.value.trim() + '\n' : '') + text.trim();
+          updateCount();
+        }
+      } catch {
+        toast('مقدرناش نقرا الحافظة. الصق يدوي بـ Ctrl+V', 'warning');
+      }
+    });
+
+    if (dlBtn) dlBtn.addEventListener('click', async () => {
+      const urls = parseBatchLinks(linksEl?.value);
+      if (!urls.length) return toast('مفيش روابط صالحة. الصق روابط الأول', 'warning');
+      const dir = (folderEl?.value || '').trim() || BATCH_DEFAULT_DIR;
+      try { localStorage.setItem('mediagrab_batch_dir', dir); } catch {}
+
+      // Subfolder: use the typed product name, or auto-number (1, 2, 3…) when blank.
+      let sub = (subfolderEl?.value || '').trim();
+      if (!sub) {
+        try {
+          const r = await apiCall('/next-subfolder', { outputDir: dir, prefix: '' });
+          sub = r?.name || '';
+        } catch (e) {
+          toast('متعرفناش نرقّم المجلد تلقائي: ' + (e?.message || 'خطأ'), 'warning');
+        }
+      }
+
+      const items = urls.map((u) => ({ id: undefined, url: u, title: u, platform: detectPlatform(u) || state.platform }));
+      toast(`تحميل ${urls.length} رابط في ${sub ? dir + '\\' + sub : dir}`, 'info');
+      startBatchDownload(items, { outputDir: dir, subfolder: sub });
+      close();
+      if (subfolderEl) subfolderEl.value = '';
+    });
+  }
+
+  function bindTiktokEmbed() {
+    const btn = document.getElementById('tiktok-embed-btn');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        if (!window.electronAPI?.tiktok?.openSearchWindow) return;
+        const q = (dom.searchInput?.value || '').trim();
+        if (!q) return toast('اكتب اسم المنتج الأول', 'warning');
+        window.electronAPI.tiktok.openSearchWindow(q);
+        toast('فتحنا تيك توك — دوس «تحميل» على أي فيديو', 'info', 5000);
+      });
+    }
+    // Downloads triggered from inside the embedded TikTok window → normal queue.
+    if (window.electronAPI?.tiktok?.onEmbedDownload) {
+      window.electronAPI.tiktok.onEmbedDownload((data) => {
+        if (!data) return;
+        // Use the Output Directory from Settings, then a subfolder named after
+        // the search (so each product's videos group in their own folder).
+        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const sub = (data.folder || '').trim();
+        // Accept a single url OR an array — sending "all/selected" as ONE batch
+        // makes it a single cancellable job (Stop cancels them all reliably).
+        const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
+        if (!urls.length) return;
+        const items = urls.map((u) => ({ id: undefined, url: u, title: u, platform: 'tiktok' }));
+        startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
       });
     }
   }
@@ -2950,6 +3160,50 @@
         toast('النص المُسقَط ليس رابطًا صالحًا', 'warning');
       }
     });
+
+    // ─── Drag & drop image file(s) anywhere → reverse-image-search each ──────
+    let imgDropOverlay = null;
+    function showImgDropOverlay(show) {
+      if (show && !imgDropOverlay) {
+        imgDropOverlay = document.createElement('div');
+        imgDropOverlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(108,92,231,.18);display:flex;align-items:center;justify-content:center;pointer-events:none;';
+        imgDropOverlay.innerHTML = '<div style="background:#1e1b3a;color:#fff;padding:22px 34px;border-radius:14px;font-size:18px;font-weight:700;border:2px dashed #a855f7;">🔎 أفلت الصور للبحث عنها في جوجل</div>';
+        document.body.appendChild(imgDropOverlay);
+      } else if (!show && imgDropOverlay) {
+        imgDropOverlay.remove();
+        imgDropOverlay = null;
+      }
+    }
+    function dragHasFiles(e) {
+      const types = e.dataTransfer?.types || [];
+      return Array.prototype.indexOf.call(types, 'Files') !== -1;
+    }
+    let dragDepth = 0;
+    document.addEventListener('dragenter', (e) => {
+      if (!dragHasFiles(e)) return;
+      dragDepth++;
+      showImgDropOverlay(true);
+    });
+    document.addEventListener('dragover', (e) => {
+      if (dragHasFiles(e)) e.preventDefault();
+    });
+    document.addEventListener('dragleave', () => {
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) showImgDropOverlay(false);
+    });
+    document.addEventListener('drop', async (e) => {
+      const files = Array.from(e.dataTransfer?.files || []).filter((f) => (f.type || '').startsWith('image/'));
+      dragDepth = 0;
+      showImgDropOverlay(false);
+      if (!files.length) return;
+      e.preventDefault();
+      toast(files.length > 1 ? `بنبحث عن ${files.length} صورة في جوجل…` : 'بنبحث عن الصورة في جوجل…', 'info', 6000);
+      // One Google search per image, staggered so the uploads/tabs don't clash.
+      for (let i = 0; i < files.length; i++) {
+        reverseImageSearch(files[i]);
+        if (i < files.length - 1) await new Promise((r) => setTimeout(r, 1300));
+      }
+    });
   }
 
   // ─── Utils ──────────────────────────────────────────
@@ -3024,6 +3278,9 @@
     initEvents();
     bindInstagramLoginButtons();
     bindFacebookLoginButtons();
+    bindTiktokLoginButtons();
+    bindTiktokEmbed();
+    bindBatchModal();
     bindCookieImportButtons();
     bindLicenseAndYtdlpButtons();
     switchPlatform('tiktok');

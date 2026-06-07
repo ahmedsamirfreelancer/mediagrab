@@ -214,6 +214,36 @@
     </div>
   </div>
 
+  <!-- Batch Download Modal -->
+  <div id="batch-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>تحميل دفعة روابط</h2>
+        <button class="modal-close" id="batch-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-group">
+          <label for="batch-links">الصق الروابط — رابط في كل سطر</label>
+          <textarea id="batch-links" rows="8" spellcheck="false" placeholder="https://www.tiktok.com/@user/video/123...&#10;https://www.youtube.com/watch?v=...&#10;https://www.instagram.com/reel/..." style="width:100%; resize:vertical; direction:ltr; font-family:monospace; font-size:12px; padding:10px; border-radius:8px;"></textarea>
+          <span class="setting-hint" id="batch-count-hint">٠ رابط</span>
+        </div>
+        <div class="setting-group">
+          <label for="batch-folder">المجلد الأساسي</label>
+          <input type="text" id="batch-folder" spellcheck="false" placeholder="E:\منتجات التست" style="direction:ltr;">
+        </div>
+        <div class="setting-group">
+          <label for="batch-subfolder">اسم مجلد المنتج</label>
+          <input type="text" id="batch-subfolder" spellcheck="false" placeholder="اكتب اسم المنتج — أو سيبه فاضي عشان يترقّم تلقائي ١، ٢، ٣...">
+          <span class="setting-hint">الفيديوهات هتنزل في: المجلد الأساسي ← اسم المنتج. لو سيبته فاضي هيعمل مجلد برقم جديد كل مرة.</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="batch-paste">📋 لصق من الحافظة</button>
+        <button class="btn btn-primary" id="batch-download">⬇ نزّل الكل</button>
+      </div>
+    </div>
+  </div>
+
   <!-- App Container -->
   <div class="app">
     <!-- Header -->
@@ -233,7 +263,7 @@
           </svg>
           <h1 class="logo-text">MediaGrab</h1>
         </div>
-        <span class="version-badge">v1.0.18</span>
+        <span class="version-badge">v1.0.19</span>
       </div>
       <div class="header-right">
         <div class="connection-status" id="connection-status">
@@ -292,6 +322,10 @@
             </button>
             <button class="btn btn-ghost" id="import-urls-btn" title="استيراد روابط من ملف نصي">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </button>
+            <button class="btn btn-secondary" id="batch-btn" title="الصق عدة روابط وحمّلهم دفعة واحدة في مجلد واحد">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              <span>تحميل دفعة</span>
             </button>
             <input type="file" id="import-urls-file" accept=".txt,.csv" style="display:none">
           </div>

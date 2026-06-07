@@ -22,6 +22,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     login: () => ipcRenderer.invoke('facebook:login'),
     logout: () => ipcRenderer.invoke('facebook:logout'),
   },
+  // TikTok in-app login + real-page search (matches tiktok.com results)
+  tiktok: {
+    status: () => ipcRenderer.invoke('tiktok:status'),
+    login: () => ipcRenderer.invoke('tiktok:login'),
+    logout: () => ipcRenderer.invoke('tiktok:logout'),
+    searchViaPage: (query) => ipcRenderer.invoke('tiktok:searchViaPage', query),
+    cookiesFromBrowser: () => ipcRenderer.invoke('tiktok:cookiesFromBrowser'),
+    openSearchWindow: (query, base) => ipcRenderer.invoke('tiktok:openSearchWindow', query, base),
+    // Fires when a download button inside the embedded TikTok window is clicked.
+    onEmbedDownload: (cb) => ipcRenderer.on('tiktok-embed:download', (_e, data) => cb(data)),
+  },
   // Manual cookies.txt import — workaround for Chrome 127+ DPAPI lock
   cookies: {
     import: (platform) => ipcRenderer.invoke('cookies:import', platform),
