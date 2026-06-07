@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     logout: () => ipcRenderer.invoke('instagram:logout'),
     apiFetch: (url) => ipcRenderer.invoke('instagram:apiFetch', url),
     searchViaPage: (query) => ipcRenderer.invoke('instagram:searchViaPage', query),
+    // Open instagram.com search in a visible (mobile-UA) window with download
+    // buttons on every reel — the Instagram twin of tiktok.openSearchWindow.
+    openSearchWindow: (query, base) => ipcRenderer.invoke('instagram:openSearchWindow', query, base),
+    onEmbedDownload: (cb) => ipcRenderer.on('instagram-embed:download', (_e, data) => cb(data)),
   },
   // Facebook in-app login (same pattern as Instagram)
   facebook: {

@@ -787,6 +787,124 @@ ipcMain.handle('tiktok-embed:clearDownloaded', async () => {
   });
 });
 
+/* ─── Instagram embedded search (mirrors the TikTok embed) ────────────────
+ * Open instagram.com's real search in a visible window with download buttons
+ * on every reel/post (via preload-instagram-embed.js). The window uses a
+ * MOBILE user-agent so Instagram serves its phone layout — the only one whose
+ * keyword search surfaces Reels (the desktop site hides them). */
+
+// An iPhone Safari UA. Instagram keys its "this is a phone → show Reels in
+// search" behaviour off the UA, so we present one for this window only.
+const IG_MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+
+ipcMain.handle('instagram:openSearchWindow', async (_evt, query, base) => {
+  lastEmbedBase = base || lastEmbedBase || '';
+  const ses = session.fromPartition(IG_SESSION_PARTITION);
+  await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
+
+  const win = new BrowserWindow({
+    width: 460, // phone-ish width so Instagram's mobile grid lays out right
+    height: 900,
+    title: 'Instagram — دوس «تحميل» على أي ريل',
+    parent: mainWin || undefined,
+    autoHideMenuBar: true,
+    backgroundColor: '#000000',
+    webPreferences: {
+      partition: IG_SESSION_PARTITION,
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload-instagram-embed.js'),
+    },
+  });
+  // Spoof a phone for every request this window makes (page + XHR), so
+  // Instagram's keyword search returns Reels.
+  try { win.webContents.setUserAgent(IG_MOBILE_UA); } catch {}
+  const url = `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(query || '')}`;
+  win.loadURL(url, { userAgent: IG_MOBILE_UA });
+  return { success: true };
+});
+
+// A download button inside the embedded Instagram window was clicked — forward
+// the reel/post URL + folder to the main window's normal download queue.
+ipcMain.on('instagram-embed:download', (_evt, payload) => {
+  const hasWork = payload && (payload.url || (Array.isArray(payload.urls) && payload.urls.length));
+  if (mainWin && hasWork) {
+    mainWin.webContents.send('instagram-embed:download', payload);
+  }
+});
+
+// Which Instagram items were already downloaded → badge them.
+ipcMain.handle('instagram-embed:downloadedIds', async () => {
+  return new Promise((resolve) => {
+    try {
+      const req = require('http').get(`http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=instagram`, (res) => {
+        let d = '';
+        res.on('data', (c) => (d += c));
+        res.on('end', () => { try { resolve(JSON.parse(d).ids || []); } catch { resolve([]); } });
+      });
+      req.on('error', () => resolve([]));
+      req.setTimeout(4000, () => { req.destroy(); resolve([]); });
+    } catch { resolve([]); }
+  });
+});
+
+// The embed shares the same base output dir + folder-open + stop-all plumbing
+// as TikTok (lastEmbedBase is shared); only the platform-tagged endpoints differ.
+ipcMain.handle('instagram-embed:baseDir', async () => lastEmbedBase);
+
+ipcMain.handle('instagram-embed:openFolder', async (_evt, folder) => {
+  try {
+    const winLong = (p) => (process.platform === 'win32' && !p.startsWith('\\\\?\\')) ? '\\\\?\\' + p : p;
+    const exists = (p) => { try { return fs.existsSync(p) || fs.existsSync(winLong(p)); } catch { return false; } };
+    let target = lastEmbedBase || '';
+    if (folder) {
+      const joined = path.join(lastEmbedBase || '', String(folder));
+      if (exists(joined)) target = joined;
+    }
+    if (!target) return { success: false, error: 'مفيش مسار' };
+    if (!exists(target)) { try { fs.mkdirSync(winLong(target), { recursive: true }); } catch {} }
+    let err = await shell.openPath(winLong(target));
+    if (err) err = await shell.openPath(target);
+    return err ? { success: false, error: err } : { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('instagram-embed:stopAll', async () => {
+  return new Promise((resolve) => {
+    try {
+      const req = require('http').request(
+        `http://127.0.0.1:${SERVER_PORT}/api/cancel-all`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+        (res) => {
+          let d = '';
+          res.on('data', (c) => (d += c));
+          res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({ cancelled: 0 }); } });
+        }
+      );
+      req.on('error', () => resolve({ cancelled: 0 }));
+      req.setTimeout(5000, () => { req.destroy(); resolve({ cancelled: 0 }); });
+      req.end('{}');
+    } catch { resolve({ cancelled: 0 }); }
+  });
+});
+
+ipcMain.handle('instagram-embed:clearDownloaded', async () => {
+  return new Promise((resolve) => {
+    try {
+      const req = require('http').request(
+        `http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=instagram`,
+        { method: 'DELETE' },
+        (res) => { res.on('data', () => {}); res.on('end', () => resolve({ success: true })); }
+      );
+      req.on('error', () => resolve({ success: false }));
+      req.setTimeout(4000, () => { req.destroy(); resolve({ success: false }); });
+      req.end();
+    } catch { resolve({ success: false }); }
+  });
+});
+
 /* Load tiktok.com's own search page in a hidden window and scrape the video
  * grid — gives the exact same videos TikTok shows, unlike the TikWM API. */
 ipcMain.handle('tiktok:searchViaPage', async (_evt, query) => {

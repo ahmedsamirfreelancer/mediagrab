@@ -533,26 +533,13 @@
         payload.query = trimmed.replace(/^[@#]/, '');
       }
 
-      // Instagram keyword search: Instagram's API endpoints reject programmatic
-      // calls even with valid cookies ("Oops, an error occurred"), so load the
-      // real search page in a hidden Electron window and scrape the DOM. To
-      // Instagram this looks indistinguishable from a real user scrolling.
-      if (state.platform === 'instagram' && payload.mode === 'hashtag' && window.electronAPI?.instagram?.searchViaPage) {
-        toast('بيفتح Instagram في الخلفية ويـscrape النتائج...', 'info');
-        const r = await window.electronAPI.instagram.searchViaPage(payload.query);
-        if (!r?.success) throw new Error(r?.error || 'فشل البحث');
-        const sliced = payload.count > 0 ? (r.results || []).slice(0, payload.count) : (r.results || []);
-        const results = sliced.map((item) => ({
-          id: item.id,
-          title: item.alt || `${item.kind === 'reel' ? 'Reel' : 'Post'} ${item.id}`,
-          url: item.url,
-          thumbnail: item.thumbnail,
-          uploader: '',
-          author: '',
-          playCount: 0,
-          platform: 'instagram',
-        }));
-        handleSearchResult({ platform: 'instagram', mode: 'page-scrape', results });
+      // Instagram keyword search: open the REAL instagram.com search in a
+      // window (mobile UA so Reels show) with a download button on every reel —
+      // exactly like TikTok. Nothing gets pulled into the in-app grid.
+      if (state.platform === 'instagram' && payload.mode === 'hashtag' && window.electronAPI?.instagram?.openSearchWindow) {
+        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        window.electronAPI.instagram.openSearchWindow(payload.query, base);
+        toast('فتحنا Instagram — دوس «تحميل» على أي ريل', 'info', 5000);
         return;
       }
 
@@ -2555,6 +2542,18 @@
         const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
         if (!urls.length) return;
         const items = urls.map((u) => ({ id: undefined, url: u, title: u, platform: 'tiktok' }));
+        startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
+      });
+    }
+    // Same, for the embedded Instagram window.
+    if (window.electronAPI?.instagram?.onEmbedDownload) {
+      window.electronAPI.instagram.onEmbedDownload((data) => {
+        if (!data) return;
+        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const sub = (data.folder || '').trim();
+        const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
+        if (!urls.length) return;
+        const items = urls.map((u) => ({ id: undefined, url: u, title: u, platform: 'instagram' }));
         startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
       });
     }
