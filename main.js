@@ -123,6 +123,10 @@ async function bootLicensedApp() {
   startServer();
   await waitForServer();
   createMainWindow();
+  // Silently pull the TikTok login from the user's browser on startup, so the
+  // embedded search shows the same results as their logged-in browser without
+  // any manual "login" click. Non-blocking — never delays app boot.
+  ensureTiktokLoggedInAuto();
   // Re-validate against the license server in the background. If revoked,
   // the next launch will fall back to activation flow.
   licenseClient.startCron();
@@ -587,7 +591,7 @@ ipcMain.handle('tiktok:logout', async () => {
  * `sessionid`, write it to our cookies file, and load it into the search
  * session — no manual login needed. (Chromium browsers may need to be CLOSED
  * because of Windows' cookie-DB lock; Firefox works while open.) */
-ipcMain.handle('tiktok:cookiesFromBrowser', async () => {
+async function autoPullTiktokCookiesFromBrowser() {
   const { spawnSync } = require('child_process');
   const ytdlp = getYtdlpActivePath();
   const outFile = getTtCookiesFilePath();
@@ -648,7 +652,22 @@ ipcMain.handle('tiktok:cookiesFromBrowser', async () => {
       ? 'مفيش تسجيل دخول TikTok في المتصفحات. سجّل دخول TikTok في المتصفح الأول.'
       : 'مفيش متصفح مدعوم متسطّب فيه تسجيل دخول TikTok.',
   };
-});
+}
+
+ipcMain.handle('tiktok:cookiesFromBrowser', async () => autoPullTiktokCookiesFromBrowser());
+
+// Pull the TikTok login from the browser automatically, at most once per app
+// run, but only when we're not already logged in. Fired on startup and right
+// before the search window opens, so the user never has to click "login".
+let ttAutoPullDone = false;
+async function ensureTiktokLoggedInAuto() {
+  if (ttAutoPullDone) return;
+  ttAutoPullDone = true;
+  try {
+    if (await isTiktokLoggedIn()) return;
+    await autoPullTiktokCookiesFromBrowser();
+  } catch {}
+}
 
 /* Open the REAL tiktok.com search in a visible window with download buttons
  * injected on every video (via preload-tiktok-embed.js). This gives the user
@@ -657,6 +676,9 @@ ipcMain.handle('tiktok:cookiesFromBrowser', async () => {
 let lastEmbedBase = ''; // base output dir for the embedded window's downloads
 ipcMain.handle('tiktok:openSearchWindow', async (_evt, query, base) => {
   lastEmbedBase = base || lastEmbedBase || '';
+  // Make sure we've tried to pull the browser login before showing results,
+  // so the window opens already logged in (guests get few/no video results).
+  await ensureTiktokLoggedInAuto();
   const ses = session.fromPartition(TT_SESSION_PARTITION);
   await injectCookiesFromFileToSession(getTtCookiesFilePath(), ses);
 
