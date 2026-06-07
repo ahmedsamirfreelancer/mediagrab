@@ -2102,13 +2102,12 @@
       dom.searchInput.placeholder = placeholders[platform] || 'Search for videos...';
     }
 
-    // Show/hide Instagram login banner.
+    // Instagram now mirrors TikTok exactly: NO in-app login banner. You just
+    // search → the Instagram window opens → if you're not logged in you log in
+    // inside that window (Instagram's own "Log in"), and it persists. So keep
+    // the banner hidden on every tab.
     const igBanner = document.getElementById('ig-login-banner');
-    if (igBanner) {
-      const showBanner = platform === 'instagram' && !!window.electronAPI?.instagram;
-      igBanner.style.display = showBanner ? 'flex' : 'none';
-      if (showBanner) refreshInstagramLoginStatus();
-    }
+    if (igBanner) igBanner.style.display = 'none';
     // Show/hide Facebook login banner.
     const fbBanner = document.getElementById('fb-login-banner');
     if (fbBanner) {
