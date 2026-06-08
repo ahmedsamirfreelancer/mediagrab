@@ -542,6 +542,15 @@
         return;
       }
 
+      // Facebook keyword search: open Facebook's live video search in a window
+      // (mobile UA) with a download button on every video.
+      if (state.platform === 'facebook' && payload.mode === 'hashtag' && window.electronAPI?.facebook?.openSearchWindow) {
+        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        window.electronAPI.facebook.openSearchWindow(payload.query, base);
+        toast('فتحنا Facebook — دوس «تحميل» على أي فيديو', 'info', 5000);
+        return;
+      }
+
       // TikTok: open the REAL tiktok.com search in a window with download
       // buttons on every video — exact same results as the site, and nothing
       // gets pulled into the in-app grid.
@@ -2559,6 +2568,21 @@
         const items = urls.map((u) => {
           const m = u.match(/\/(reel|tv|p)\/([^/?]+)/);
           return { id: undefined, url: u, title: m ? ('instagram_' + m[2]) : u, platform: 'instagram' };
+        });
+        startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
+      });
+    }
+    // Same, for the embedded Facebook window.
+    if (window.electronAPI?.facebook?.onEmbedDownload) {
+      window.electronAPI.facebook.onEmbedDownload((data) => {
+        if (!data) return;
+        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const sub = (data.folder || '').trim();
+        const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
+        if (!urls.length) return;
+        const items = urls.map((u) => {
+          const id = (u.match(/[?&]v=(\d+)/) || u.match(/\/(?:reel|videos)\/(\d+)/) || [])[1];
+          return { id: undefined, url: u, title: id ? ('facebook_' + id) : u, platform: 'facebook' };
         });
         startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
       });

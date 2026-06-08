@@ -910,6 +910,112 @@ ipcMain.handle('instagram-embed:clearDownloaded', async () => {
   });
 });
 
+/* ─── Facebook embedded video search (mirrors the Instagram embed) ────────── */
+
+const FB_MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+
+ipcMain.handle('facebook:openSearchWindow', async (_evt, query, base) => {
+  lastEmbedBase = base || lastEmbedBase || '';
+  const ses = session.fromPartition(FB_SESSION_PARTITION);
+  await injectCookiesFromFileToSession(getFbCookiesFilePath(), ses);
+
+  const win = new BrowserWindow({
+    width: 760,
+    height: 940,
+    title: 'Facebook — دوس «تحميل» على أي فيديو',
+    parent: mainWin || undefined,
+    autoHideMenuBar: true,
+    backgroundColor: '#000000',
+    webPreferences: {
+      partition: FB_SESSION_PARTITION,
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload-facebook-embed.js'),
+    },
+  });
+  try { win.webContents.setUserAgent(FB_MOBILE_UA); } catch {}
+  // Facebook's dedicated video search.
+  const url = `https://www.facebook.com/watch/search/?query=${encodeURIComponent(query || '')}`;
+  win.loadURL(url, { userAgent: FB_MOBILE_UA });
+  return { success: true };
+});
+
+ipcMain.on('facebook-embed:download', (_evt, payload) => {
+  const hasWork = payload && (payload.url || (Array.isArray(payload.urls) && payload.urls.length));
+  if (mainWin && hasWork) {
+    mainWin.webContents.send('facebook-embed:download', payload);
+  }
+});
+
+ipcMain.handle('facebook-embed:downloadedIds', async () => {
+  return new Promise((resolve) => {
+    try {
+      const req = require('http').get(`http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=facebook`, (res) => {
+        let d = '';
+        res.on('data', (c) => (d += c));
+        res.on('end', () => { try { resolve(JSON.parse(d).ids || []); } catch { resolve([]); } });
+      });
+      req.on('error', () => resolve([]));
+      req.setTimeout(4000, () => { req.destroy(); resolve([]); });
+    } catch { resolve([]); }
+  });
+});
+
+ipcMain.handle('facebook-embed:baseDir', async () => lastEmbedBase);
+
+ipcMain.handle('facebook-embed:openFolder', async (_evt, folder) => {
+  try {
+    const winLong = (p) => (process.platform === 'win32' && !p.startsWith('\\\\?\\')) ? '\\\\?\\' + p : p;
+    const exists = (p) => { try { return fs.existsSync(p) || fs.existsSync(winLong(p)); } catch { return false; } };
+    let target = lastEmbedBase || '';
+    if (folder) {
+      const joined = path.join(lastEmbedBase || '', String(folder));
+      if (exists(joined)) target = joined;
+    }
+    if (!target) return { success: false, error: 'مفيش مسار' };
+    if (!exists(target)) { try { fs.mkdirSync(winLong(target), { recursive: true }); } catch {} }
+    let err = await shell.openPath(winLong(target));
+    if (err) err = await shell.openPath(target);
+    return err ? { success: false, error: err } : { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('facebook-embed:stopAll', async () => {
+  return new Promise((resolve) => {
+    try {
+      const req = require('http').request(
+        `http://127.0.0.1:${SERVER_PORT}/api/cancel-all`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+        (res) => {
+          let d = '';
+          res.on('data', (c) => (d += c));
+          res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({ cancelled: 0 }); } });
+        }
+      );
+      req.on('error', () => resolve({ cancelled: 0 }));
+      req.setTimeout(5000, () => { req.destroy(); resolve({ cancelled: 0 }); });
+      req.end('{}');
+    } catch { resolve({ cancelled: 0 }); }
+  });
+});
+
+ipcMain.handle('facebook-embed:clearDownloaded', async () => {
+  return new Promise((resolve) => {
+    try {
+      const req = require('http').request(
+        `http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=facebook`,
+        { method: 'DELETE' },
+        (res) => { res.on('data', () => {}); res.on('end', () => resolve({ success: true })); }
+      );
+      req.on('error', () => resolve({ success: false }));
+      req.setTimeout(4000, () => { req.destroy(); resolve({ success: false }); });
+      req.end();
+    } catch { resolve({ success: false }); }
+  });
+});
+
 /* Load tiktok.com's own search page in a hidden window and scrape the video
  * grid — gives the exact same videos TikTok shows, unlike the TikWM API. */
 ipcMain.handle('tiktok:searchViaPage', async (_evt, query) => {

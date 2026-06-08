@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     status: () => ipcRenderer.invoke('facebook:status'),
     login: () => ipcRenderer.invoke('facebook:login'),
     logout: () => ipcRenderer.invoke('facebook:logout'),
+    openSearchWindow: (query, base) => ipcRenderer.invoke('facebook:openSearchWindow', query, base),
+    onEmbedDownload: (cb) => ipcRenderer.on('facebook-embed:download', (_e, data) => cb(data)),
   },
   // TikTok in-app login + real-page search (matches tiktok.com results)
   tiktok: {
