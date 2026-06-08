@@ -320,51 +320,55 @@ const { ipcRenderer } = require('electron');
       // Grid thumbnails only — real cards wrap an <img>.
       if (!a.querySelector('img')) continue;
       // We DON'T hide photos (Instagram's grid leaves holes when tiles are
-      // hidden). Instead every tile gets a type badge so the user can tell
-      // videos from photo posts at a glance.
+      // hidden). Every tile gets a type badge; only VIDEOS get a download
+      // button + select checkbox — photos can't be downloaded, so we don't put
+      // a button on them at all (it would only fail).
       const cell = cellOf(a);
       const isVid = isVideoTile(a, cell);
-      // Exactly ONE set of controls per item.
-      if (document.querySelector('.' + BTN_CLASS + '[data-vid="' + id + '"]')) continue;
+      // Exactly ONE decoration per item (badge is on every tile, so key on it).
+      if (document.querySelector('.mg-type[data-vid="' + id + '"]')) continue;
       const url = 'https://www.instagram.com/' + kind + '/' + id + '/';
       if (getComputedStyle(a).position === 'static') a.style.position = 'relative';
-      const btn = document.createElement('button');
-      btn.className = BTN_CLASS;
-      btn.setAttribute('data-vid', id);
-      btn.setAttribute('data-url', url);
-      btn.style.cssText = 'position:absolute;top:8px;left:8px;z-index:50;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5);';
-      if (downloadedSet.has(id)) btn.dataset.done = '1';
-      applyState(btn);
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const folder = currentFolder();
-        ipcRenderer.send('instagram-embed:download', { url, folder });
-        btn.dataset.done = '1';
-        btn.textContent = '✓ في الطابور';
-        btn.style.background = '#16a34a';
-        setTimeout(() => applyState(btn), 2500);
-      }, true);
-      a.appendChild(btn);
 
-      // Video vs photo badge (bottom-left, clear of the button + checkbox).
+      if (isVid) {
+        const btn = document.createElement('button');
+        btn.className = BTN_CLASS;
+        btn.setAttribute('data-vid', id);
+        btn.setAttribute('data-url', url);
+        btn.style.cssText = 'position:absolute;top:8px;left:8px;z-index:50;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5);';
+        if (downloadedSet.has(id)) btn.dataset.done = '1';
+        applyState(btn);
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const folder = currentFolder();
+          ipcRenderer.send('instagram-embed:download', { url, folder });
+          btn.dataset.done = '1';
+          btn.textContent = '✓ في الطابور';
+          btn.style.background = '#16a34a';
+          setTimeout(() => applyState(btn), 2500);
+        }, true);
+        a.appendChild(btn);
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'mg-sel';
+        cb.setAttribute('data-vid', id);
+        cb.setAttribute('data-url', url);
+        cb.style.cssText = 'position:absolute;top:8px;right:8px;z-index:50;width:22px;height:22px;cursor:pointer;accent-color:#9333ea;';
+        cb.addEventListener('click', (e) => e.stopPropagation(), true);
+        cb.addEventListener('change', updateSelCount);
+        a.appendChild(cb);
+      }
+
+      // Type badge — on videos it sits under the «تحميل» button; on photos
+      // (no button) it sits at the very top corner.
       const badge = document.createElement('div');
       badge.className = 'mg-type';
       badge.setAttribute('data-vid', id);
       badge.textContent = isVid ? '🎬 فيديو' : '📷 صورة';
-      // Directly under the «تحميل» button (top-left), so it never blocks the view.
-      badge.style.cssText = 'position:absolute;top:42px;left:8px;z-index:50;padding:3px 8px;border-radius:7px;font-size:11px;font-weight:700;color:#fff;direction:rtl;box-shadow:0 1px 4px rgba(0,0,0,.6);background:' + (isVid ? '#16a34a' : '#6b7280') + ';';
+      badge.style.cssText = 'position:absolute;top:' + (isVid ? '42' : '8') + 'px;left:8px;z-index:50;padding:3px 8px;border-radius:7px;font-size:11px;font-weight:700;color:#fff;direction:rtl;box-shadow:0 1px 4px rgba(0,0,0,.6);background:' + (isVid ? '#16a34a' : '#6b7280') + ';';
       a.appendChild(badge);
-
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.className = 'mg-sel';
-      cb.setAttribute('data-vid', id);
-      cb.setAttribute('data-url', url);
-      cb.style.cssText = 'position:absolute;top:8px;right:8px;z-index:50;width:22px;height:22px;cursor:pointer;accent-color:#9333ea;';
-      cb.addEventListener('click', (e) => e.stopPropagation(), true);
-      cb.addEventListener('change', updateSelCount);
-      a.appendChild(cb);
     }
   }
 
