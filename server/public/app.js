@@ -2539,7 +2539,12 @@
         // makes it a single cancellable job (Stop cancels them all reliably).
         const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
         if (!urls.length) return;
-        const items = urls.map((u) => ({ id: undefined, url: u, title: u, platform: 'tiktok' }));
+        // Clean ASCII filename from the video id (NOT the raw URL — that made
+        // unopenable names like "https___www...mp4").
+        const items = urls.map((u) => {
+          const id = (u.match(/\/video\/(\d+)/) || [])[1];
+          return { id: undefined, url: u, title: id ? ('tiktok_' + id) : u, platform: 'tiktok' };
+        });
         startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
       });
     }
@@ -2551,7 +2556,10 @@
         const sub = (data.folder || '').trim();
         const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
         if (!urls.length) return;
-        const items = urls.map((u) => ({ id: undefined, url: u, title: u, platform: 'instagram' }));
+        const items = urls.map((u) => {
+          const m = u.match(/\/(reel|tv|p)\/([^/?]+)/);
+          return { id: undefined, url: u, title: m ? ('instagram_' + m[2]) : u, platform: 'instagram' };
+        });
         startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
       });
     }

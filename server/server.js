@@ -938,7 +938,20 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
 
     proc.on('close', (code) => {
       if (entry?.cancelled) return reject(new Error('Cancelled'));
-      if (code === 0) return resolve(lastFile || outputDir);
+      if (code === 0) {
+        // Prefer the path WE built (correct Node string encoding) over the one
+        // parsed from yt-dlp's stdout, which mangles non-ASCII parent dirs into
+        // spaces on Windows (the cause of "Windows cannot find E:\ \ \..mp4" and
+        // "تعذّر فتح المجلد"). Only usable when safeName is a concrete name.
+        if (!/%\(/.test(safeName)) {
+          const finalExt = effectiveQuality === 'audio' ? 'mp3' : 'mp4';
+          const built = path.join(outputDir, `${safeName}.${finalExt}`);
+          try {
+            if (fs.existsSync(built) || fs.existsSync('\\\\?\\' + built)) return resolve(built);
+          } catch {}
+        }
+        return resolve(lastFile || outputDir);
+      }
       // 101 = item rejected by --match-filter (e.g. an Instagram photo post
       // failing duration>0). Surface it as a friendly "not a video" message
       // so the UI can show it as skipped, not a hard error.

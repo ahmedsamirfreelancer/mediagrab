@@ -428,18 +428,62 @@ const { ipcRenderer } = require('electron');
     }
   }
 
+  // Remember where the user was scrolled in the grid, so opening a reel and
+  // hitting «رجوع للنتايج» returns them to the same spot instead of the top.
+  let mgScrollY = 0;
+  let mgPrevListing = false;
+  function saveScroll() {
+    if (!onListingPage()) return;
+    const y = window.scrollY || (document.scrollingElement && document.scrollingElement.scrollTop) || 0;
+    if (y > 0) mgScrollY = y;
+  }
+  window.addEventListener('scroll', saveScroll, true);
+  function restoreScrollSoon() {
+    const y = mgScrollY;
+    if (y <= 0) return;
+    [80, 250, 550, 1000, 1600].forEach((t) => setTimeout(() => {
+      if (!onListingPage()) return;
+      try {
+        window.scrollTo(0, y);
+        if (document.scrollingElement) document.scrollingElement.scrollTop = y;
+      } catch {}
+    }, t));
+  }
+
+  // Instagram sometimes serves a blank first paint to the automated window
+  // (zero tiles, empty body) even when the query has plenty of Reels. If a
+  // SEARCH page is still empty after a few seconds, reload it ONCE (guarded by
+  // sessionStorage so we never loop on a genuinely empty query).
+  const mgStart = Date.now();
+  function checkBlankReload() {
+    if (!/^\/explore\/search/.test(location.pathname)) return;
+    if (Date.now() - mgStart < 7000) return;
+    const tiles = document.querySelectorAll('a[href*="/reel/"], a[href*="/tv/"], a[href*="/p/"]');
+    if (tiles.length > 0) return;
+    const key = 'mg_reload_' + location.search;
+    const n = parseInt(sessionStorage.getItem(key) || '0', 10);
+    if (n >= 1) return;
+    try { sessionStorage.setItem(key, String(n + 1)); } catch {}
+    location.reload();
+  }
+
   function tick() {
     try {
       injectStyle();
       injectToolbar();
       pushPageDown();
+      checkBlankReload();
       // Hide grid buttons when a single item is open so they don't bleed over
       // Instagram's full-screen reel viewer.
-      document.documentElement.classList.toggle('mg-hide-btns', !onListingPage());
+      const listingNow = onListingPage();
+      document.documentElement.classList.toggle('mg-hide-btns', !listingNow);
       const curBtn = document.getElementById('mg-current-btn');
       if (curBtn) curBtn.style.display = onSingleItem() ? '' : 'none';
       addButtons();
       curateGrid();
+      // Returned to the grid from a single reel → restore scroll position.
+      if (listingNow && !mgPrevListing) restoreScrollSoon();
+      mgPrevListing = listingNow;
     } catch {}
   }
 
