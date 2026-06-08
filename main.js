@@ -803,8 +803,11 @@ ipcMain.handle('instagram:openSearchWindow', async (_evt, query, base) => {
   await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
 
   const win = new BrowserWindow({
-    width: 460, // phone-ish width so Instagram's mobile grid lays out right
-    height: 900,
+    // Mobile UA (below) makes Instagram serve its fluid phone layout — which
+    // fills whatever width it's given — so we can keep the Reels content but
+    // make the window wide like a desktop app instead of a skinny phone.
+    width: 980,
+    height: 940,
     title: 'Instagram — دوس «تحميل» على أي ريل',
     parent: mainWin || undefined,
     autoHideMenuBar: true,

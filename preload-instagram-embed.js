@@ -120,7 +120,7 @@ const { ipcRenderer } = require('electron');
     try {
       const bar = document.getElementById('mg-toolbar');
       if (!bar || !document.body) return;
-      const h = bar.offsetHeight + 6;
+      const h = bar.offsetHeight + 14; // a little breathing room under the bar
       document.body.style.paddingTop = h + 'px';
       for (const el of document.querySelectorAll('body *')) {
         if (el.id === 'mg-toolbar' || el.closest('#mg-toolbar')) continue;
@@ -265,8 +265,10 @@ const { ipcRenderer } = require('electron');
 
   function addButtons() {
     if (!onListingPage()) return;
-    for (const a of document.querySelectorAll('a[href*="/reel/"], a[href*="/p/"], a[href*="/tv/"]')) {
-      const m = (a.getAttribute('href') || '').match(/\/(reel|p|tv)\/([^/?]+)/);
+    // Videos only: /reel/ and /tv/ (IGTV). /p/ posts are mostly photos, so we
+    // skip them entirely — the user wants Reels/videos, no images.
+    for (const a of document.querySelectorAll('a[href*="/reel/"], a[href*="/tv/"]')) {
+      const m = (a.getAttribute('href') || '').match(/\/(reel|tv)\/([^/?]+)/);
       if (!m) continue;
       const kind = m[1], id = m[2];
       // Skip the opened-item popup (comments/related links live there).
@@ -316,6 +318,67 @@ const { ipcRenderer } = require('electron');
     (document.head || document.documentElement).appendChild(s);
   }
 
+  // How many reels per row in the (now wide) window.
+  const IG_COLS = 5;
+
+  // The grid "cell" of a tile = the ancestor whose PARENT holds several tiles
+  // (i.e. the parent is the grid container, the cell is one of its children).
+  function cellOf(a) {
+    let el = a;
+    while (el.parentElement && el.parentElement !== document.body) {
+      const p = el.parentElement;
+      if (p.querySelectorAll('a[href*="/reel/"], a[href*="/p/"], a[href*="/tv/"]').length > 1) return el;
+      el = p;
+    }
+    return a;
+  }
+
+  // Reels-only + denser grid: hide every photo (/p/) tile, then re-flow the
+  // remaining reel/tv tiles into IG_COLS columns that fill our wide window.
+  // Also kills Instagram's "Use the app" bottom banner and the bottom nav bar
+  // (tapping those navigates to blank app-shell pages).
+  function curateGrid() {
+    if (!onListingPage()) return;
+    const tiles = Array.prototype.slice.call(
+      document.querySelectorAll('a[href*="/reel/"], a[href*="/p/"], a[href*="/tv/"]')
+    ).filter((a) => a.querySelector('img') && !a.closest('[role="dialog"]'));
+    let container = null;
+    for (const a of tiles) {
+      const href = a.getAttribute('href') || '';
+      const isVideo = /\/(reel|tv)\//.test(href);
+      const cell = cellOf(a);
+      if (!isVideo) { cell.style.setProperty('display', 'none', 'important'); continue; }
+      const w = (100 / IG_COLS) + '%';
+      cell.style.setProperty('flex', '0 0 ' + w, 'important');
+      cell.style.setProperty('max-width', w, 'important');
+      cell.style.setProperty('width', w, 'important');
+      cell.style.setProperty('box-sizing', 'border-box', 'important');
+      cell.style.removeProperty('display');
+      if (!container) container = cell.parentElement;
+    }
+    if (container && container.dataset.mgGrid !== '1') {
+      container.style.setProperty('display', 'flex', 'important');
+      container.style.setProperty('flex-wrap', 'wrap', 'important');
+      container.style.setProperty('align-content', 'flex-start', 'important');
+      container.style.setProperty('justify-content', 'flex-start', 'important');
+      container.dataset.mgGrid = '1';
+    }
+    // Hide the "Use the app" / "Open in app" smart-banner and the bottom nav.
+    for (const el of document.querySelectorAll('div,section,nav')) {
+      if (el.closest('#mg-toolbar')) continue;
+      if (el.dataset.mgHidden === '1') continue;
+      const cs = getComputedStyle(el);
+      if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+      const txt = (el.textContent || '').trim();
+      const isAppBanner = /Use the app|Open Instagram|Open in app|افتح التطبيق|استخدم التطبيق/i.test(txt) && txt.length < 60;
+      const isBottomNav = el.tagName === 'NAV' && parseFloat(cs.bottom) <= 4;
+      if (isAppBanner || isBottomNav) {
+        el.style.setProperty('display', 'none', 'important');
+        el.dataset.mgHidden = '1';
+      }
+    }
+  }
+
   function tick() {
     try {
       injectStyle();
@@ -327,6 +390,7 @@ const { ipcRenderer } = require('electron');
       const curBtn = document.getElementById('mg-current-btn');
       if (curBtn) curBtn.style.display = onSingleItem() ? '' : 'none';
       addButtons();
+      curateGrid();
     } catch {}
   }
 
