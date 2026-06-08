@@ -121,16 +121,12 @@ const { ipcRenderer } = require('electron');
       const bar = document.getElementById('mg-toolbar');
       if (!bar || !document.body) return;
       const h = bar.offsetHeight + 14; // a little breathing room under the bar
+      // Body padding pushes the (in-flow) grid below our toolbar. We do NOT
+      // offset Instagram's own fixed/sticky bars: on mobile its page header
+      // (back-arrow + title) is sticky, and pushing it down made it overlap
+      // the grid while scrolling. Left alone it just tucks under our toolbar —
+      // harmless, since our own "رجوع للنتايج" button covers going back.
       document.body.style.paddingTop = h + 'px';
-      for (const el of document.querySelectorAll('body *')) {
-        if (el.id === 'mg-toolbar' || el.closest('#mg-toolbar')) continue;
-        const cs = getComputedStyle(el);
-        if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
-        const top = parseFloat(cs.top);
-        if (!isFinite(top) || top > 80) continue;
-        const want = h + 'px';
-        if (el.style.top !== want) el.style.top = want;
-      }
     } catch {}
   }
 
@@ -254,21 +250,25 @@ const { ipcRenderer } = require('electron');
     ipcRenderer.invoke('instagram-embed:baseDir').then((b) => { baseDir = b || ''; renderBasePath(); }).catch(() => {});
   }
 
-  // True when we're on a search / explore listing (where the grid lives).
-  function onListingPage() {
-    return /^\/explore\//.test(location.pathname) || /^\/reels\//.test(location.pathname);
-  }
-  // True when a single reel/post/tv is open (full-screen viewer).
+  // A single reel/post/tv is open in the full-screen viewer (no grid buttons).
   function onSingleItem() {
     return /^\/(reel|p|tv)\/[^/]+/.test(location.pathname);
   }
+  // Grid pages = anywhere with a thumbnail grid: search, explore, AND profiles
+  // (e.g. /username/ or /username/reels/). We show buttons on all of them and
+  // only bail inside the single-item viewer.
+  function onListingPage() {
+    return !onSingleItem();
+  }
 
   function addButtons() {
-    if (!onListingPage()) return;
-    // Videos only: /reel/ and /tv/ (IGTV). /p/ posts are mostly photos, so we
-    // skip them entirely — the user wants Reels/videos, no images.
-    for (const a of document.querySelectorAll('a[href*="/reel/"], a[href*="/tv/"]')) {
-      const m = (a.getAttribute('href') || '').match(/\/(reel|tv)\/([^/?]+)/);
+    // Show grid buttons everywhere except the single-item viewer.
+    if (onSingleItem()) return;
+    // Reels/IGTV plus posts — on profile grids even videos are linked as /p/,
+    // so we must include /p/ or most videos get NO button. (yt-dlp grabs the
+    // video from a /p/ link; if a /p/ turns out to be a photo it's skipped.)
+    for (const a of document.querySelectorAll('a[href*="/reel/"], a[href*="/tv/"], a[href*="/p/"]')) {
+      const m = (a.getAttribute('href') || '').match(/\/(reel|tv|p)\/([^/?]+)/);
       if (!m) continue;
       const kind = m[1], id = m[2];
       // Skip the opened-item popup (comments/related links live there).
