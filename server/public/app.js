@@ -481,6 +481,7 @@
       hdDownloadUrl: item.hdDownloadUrl || null,
       author: item.author || '',
       platform: item.platform || state.platform,
+      kind: item.kind || null,
     }));
 
     for (const it of enriched) {
@@ -2099,6 +2100,19 @@
     const searchable = ['tiktok', 'youtube', 'instagram', 'facebook'];
     dom.searchSection.style.display = searchable.includes(platform) ? '' : 'none';
 
+    // Ad Library tab: swap the whole download/search UI for the spy-tool launch
+    // panel. The actual browsing happens in the embedded Facebook window.
+    const isAdLib = platform === 'adlibrary';
+    const adlibSection = document.getElementById('adlib-section');
+    const inputSection = document.getElementById('drop-zone');
+    if (adlibSection) adlibSection.style.display = isAdLib ? '' : 'none';
+    if (inputSection) inputSection.style.display = isAdLib ? 'none' : '';
+    if (isAdLib) {
+      dom.searchSection.style.display = 'none';
+      dom.resultsSection?.classList.add('hidden');
+      refreshFacebookLoginStatus();
+    }
+
     // Update search placeholder per platform.
     if (dom.searchInput) {
       const placeholders = {
@@ -2585,6 +2599,28 @@
           return { id: undefined, url: u, title: id ? ('facebook_' + id) : u, platform: 'facebook' };
         });
         startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
+      });
+    }
+    // Ad Library creatives: each item carries a direct media URL + kind so the
+    // server downloads it straight (downloadFile), not through yt-dlp.
+    if (window.electronAPI?.facebook?.onAdLibDownload) {
+      window.electronAPI.facebook.onAdLibDownload((data) => {
+        if (!data || !Array.isArray(data.items) || !data.items.length) return;
+        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const sub = (data.folder || '').trim();
+        const items = data.items
+          .filter((it) => it && it.downloadUrl)
+          .map((it) => ({
+            id: undefined,
+            url: it.downloadUrl,
+            downloadUrl: it.downloadUrl,
+            kind: it.kind || 'image',
+            title: it.title || ('fb_ad_' + (it.id || '')),
+            // advertiser page name → server saves into a folder named after it
+            author: (it.advertiser || '').trim() || 'fb-ads',
+            platform: 'facebook-ad',
+          }));
+        if (items.length) startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
       });
     }
   }
@@ -3289,6 +3325,42 @@
   }
 
   // ─── Init ───────────────────────────────────────────
+  // Ad Library launch panel → opens the embedded Facebook Ad Library window.
+  function bindAdLibrary() {
+    const btn = document.getElementById('adlib-open-btn');
+    if (!btn) return;
+    const open = () => {
+      if (!window.electronAPI?.facebook?.openAdLibrary) {
+        toast('مكتبة الإعلانات متاحة في تطبيق سطح المكتب بس', 'warning');
+        return;
+      }
+      const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+      window.electronAPI.facebook.openAdLibrary({
+        query:        (document.getElementById('adlib-query')?.value || '').trim(),
+        country:       document.getElementById('adlib-country')?.value || 'EG',
+        activeStatus:  document.getElementById('adlib-status')?.value || 'active',
+        mediaType:     document.getElementById('adlib-media')?.value || 'all',
+        lang:          document.getElementById('adlib-lang')?.value || '',
+        minDays:       parseInt(document.getElementById('adlib-duration')?.value || '0', 10) || 0,
+        base,
+      });
+      toast('فتحنا مكتبة الإعلانات — الأزرار بتظهر على كل إعلان', 'info', 5000);
+    };
+    btn.addEventListener('click', open);
+    const q = document.getElementById('adlib-query');
+    if (q) q.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(); });
+    // Quick keyword chips fill the search box (one click = ready to open).
+    const chips = document.getElementById('adlib-chips');
+    if (chips && q) {
+      chips.addEventListener('click', (e) => {
+        const c = e.target.closest('.adlib-chip');
+        if (!c) return;
+        q.value = c.textContent.trim();
+        q.focus();
+      });
+    }
+  }
+
   function init() {
     loadSettings();
     loadFiltersPreference();
@@ -3307,6 +3379,7 @@
     initEvents();
     bindInstagramLoginButtons();
     bindFacebookLoginButtons();
+    bindAdLibrary();
     bindTiktokLoginButtons();
     bindTiktokEmbed();
     bindBatchModal();

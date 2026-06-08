@@ -913,6 +913,8 @@ ipcMain.handle('instagram-embed:clearDownloaded', async () => {
 /* ─── Facebook embedded video search (mirrors the Instagram embed) ────────── */
 
 const FB_MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+// Ad Library wants the DESKTOP grid layout, not the mobile single column.
+const FB_DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 ipcMain.handle('facebook:openSearchWindow', async (_evt, query, base) => {
   lastEmbedBase = base || lastEmbedBase || '';
@@ -938,6 +940,64 @@ ipcMain.handle('facebook:openSearchWindow', async (_evt, query, base) => {
   const url = `https://www.facebook.com/watch/search/?query=${encodeURIComponent(query || '')}`;
   win.loadURL(url, { userAgent: FB_MOBILE_UA });
   return { success: true };
+});
+
+/* ─── Facebook Ad Library (the "spy tool" surface) ─────────────────────────── */
+
+ipcMain.handle('facebook:openAdLibrary', async (_evt, opts) => {
+  opts = opts || {};
+  lastEmbedBase = opts.base || lastEmbedBase || '';
+  const ses = session.fromPartition(FB_SESSION_PARTITION);
+  await injectCookiesFromFileToSession(getFbCookiesFilePath(), ses);
+
+  const win = new BrowserWindow({
+    width: 1180,
+    height: 940,
+    title: 'مكتبة إعلانات فيسبوك — MediaGrab',
+    parent: mainWin || undefined,
+    autoHideMenuBar: true,
+    backgroundColor: '#0b0b14',
+    webPreferences: {
+      partition: FB_SESSION_PARTITION,
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload-fb-adlibrary.js'),
+    },
+  });
+  try { win.webContents.setUserAgent(FB_DESKTOP_UA); } catch {}
+
+  // "Winning products" filter: ads still ACTIVE that started running ≥ N days
+  // ago. Done with Facebook's own start_date[max] = (today − N days) param.
+  const minDays = parseInt(opts.minDays, 10) || 0;
+  const params = new URLSearchParams({
+    active_status: minDays > 0 ? 'active' : (opts.activeStatus || 'active'),
+    ad_type: 'all',
+    country: opts.country || 'EG',
+    media_type: opts.mediaType || 'all',
+    search_type: 'keyword_unordered',
+    q: opts.query || '',
+  });
+  if (opts.lang) params.set('content_languages[0]', opts.lang);
+  if (minDays > 0) {
+    const cutoff = new Date(Date.now() - minDays * 86400000).toISOString().slice(0, 10);
+    params.set('start_date[max]', cutoff);
+  }
+  const url = `https://www.facebook.com/ads/library/?${params.toString()}`;
+  win.loadURL(url, { userAgent: FB_DESKTOP_UA });
+  return { success: true };
+});
+
+// Forward Ad Library creative downloads to the main window's queue.
+ipcMain.on('fb-adlib:download', (_evt, payload) => {
+  const hasWork = payload && Array.isArray(payload.items) && payload.items.length;
+  if (mainWin && hasWork) mainWin.webContents.send('fb-adlib:download', payload);
+});
+
+// Open a landing page / ad permalink in the user's default browser (Chrome),
+// instead of navigating inside the embedded Facebook window.
+ipcMain.handle('fb-adlib:openExternal', async (_evt, url) => {
+  try { if (url && /^https?:/i.test(url)) await shell.openExternal(url); return { success: true }; }
+  catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.on('facebook-embed:download', (_evt, payload) => {

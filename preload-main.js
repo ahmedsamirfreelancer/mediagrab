@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     logout: () => ipcRenderer.invoke('facebook:logout'),
     openSearchWindow: (query, base) => ipcRenderer.invoke('facebook:openSearchWindow', query, base),
     onEmbedDownload: (cb) => ipcRenderer.on('facebook-embed:download', (_e, data) => cb(data)),
+    // Ad Library (spy tool): opens facebook.com/ads/library with filters, and
+    // forwards per-ad creative downloads back here.
+    openAdLibrary: (opts) => ipcRenderer.invoke('facebook:openAdLibrary', opts),
+    onAdLibDownload: (cb) => ipcRenderer.on('fb-adlib:download', (_e, data) => cb(data)),
   },
   // TikTok in-app login + real-page search (matches tiktok.com results)
   tiktok: {

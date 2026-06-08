@@ -1882,3 +1882,104 @@ body {
     flex-direction: column;
   }
 }
+
+/* ── Ad Library launch panel ─────────────────────────────────────────────── */
+.adlib-section {
+  margin-top: 8px;
+}
+.adlib-card {
+  background: linear-gradient(160deg, var(--bg-card), var(--bg-tertiary));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px 14px;
+  box-shadow: var(--shadow-md);
+}
+.adlib-head { margin-bottom: 14px; }
+.adlib-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+.adlib-title svg { width: 17px; height: 17px; }
+.adlib-title h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+}
+.adlib-sub {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+  max-width: 680px;
+}
+.adlib-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 11px;
+}
+.adlib-field { display: flex; flex-direction: column; gap: 4px; }
+.adlib-field.adlib-wide { grid-column: 1 / -1; }
+.adlib-field > span {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.adlib-field input,
+.adlib-field select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 11px;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 400;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.adlib-field input:focus,
+.adlib-field select:focus { border-color: var(--border-focus); }
+.adlib-field select { cursor: pointer; }
+.adlib-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.adlib-chip {
+  background: var(--accent-light);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.adlib-chip:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.adlib-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.adlib-actions .btn-primary { padding: 9px 18px; font-size: 13px; }
+.adlib-note {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 400;
+  flex: 1;
+  min-width: 220px;
+}
+@media (max-width: 720px) {
+  .adlib-grid { grid-template-columns: 1fr; }
+}

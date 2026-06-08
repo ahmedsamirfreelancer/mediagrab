@@ -1301,6 +1301,7 @@ app.post('/api/download', async (req, res) => {
           author: video.author || '',
           platform: video.platform || plat,
           videoId: video.videoId || null,
+          kind: video.kind || null,
         });
       }
     } else {
@@ -1477,7 +1478,18 @@ async function runDownloadOnce(task, entry, ctx) {
     }
   }
 
-  if (plat === 'tiktok') {
+  if (task.platform === 'facebook-ad' && task.downloadUrl) {
+    // Facebook Ad Library creative: scontent image or progressive video URL is
+    // already direct + public (signed). Pull it straight — yt-dlp isn't needed
+    // and can't read these. downloadFile picks the real extension from the
+    // response content-type, so the passed base ext is only a hint.
+    // Each creative is filed under a folder named after the advertiser page.
+    let adDir = taskOutputDir;
+    if (task.author) { adDir = path.join(taskOutputDir, sanitizeFilename(task.author)); ensureDir(adDir); }
+    const ext = task.kind === 'video' ? '.mp4' : '.jpg';
+    const destBase = uniquePath(path.join(adDir, filenameBase + ext));
+    filePath = await downloadFile(task.downloadUrl, destBase, task.id, task.title);
+  } else if (plat === 'tiktok') {
     if (!task.downloadUrl && !task.hdDownloadUrl) {
       const tikInfo = await tikwmGetVideo(task.url);
       if (tikInfo) {

@@ -14,6 +14,7 @@
 E:\ai\downloader-electron\
 ├── main.js                # Electron main process (BrowserWindow, IPC, server fork)
 ├── preload-main.js        # contextBridge: instagram/facebook/cookies/license/ytdlp/shell
+├── preload-fb-adlibrary.js # toolbar + per-ad actions injected into the Ad Library window
 ├── package.json
 ├── resources/
 │   ├── yt-dlp.exe         # الأداة الأساسية
@@ -90,6 +91,18 @@ npm start
 - **yt-dlp wrapper**: `server/server.js:920-1010` (_ytdlpInfoRaw, _ytdlpInfoCached)
 - **Frontend pagination**: `server/public/app.js` — `renderResults`, `renderPagination`, `pageBounds`
 - **Media proxy**: `server/server.js:380-440`
+
+### مكتبة إعلانات فيسبوك (Ad Library / أداة تجسّس)
+- تبويب «مكتبة الإعلانات» (`data-platform="adlibrary"`) فيه لوحة فلاتر (دولة/كلمة/نوع/حالة/لغة)
+- `facebook:openAdLibrary(opts)` في `main.js` يفتح `facebook.com/ads/library` بـ **DESKTOP UA**
+  (مش الموبايل — عشان شكل الـ grid) + كوكيز جلسة فيسبوك، preload = `preload-fb-adlibrary.js`
+- الـ preload بيمسك كل كارت إعلان عبر مرساة نص **"Library ID"** (مش كلاسات مبهمة)، ويحقن:
+  ⬇ تحميل الإبداع · 📋 نسخ النص · 🔗 رابط الهبوط (يفك `l.php?u=`) · 📑 كل إعلانات نفس الصفحة
+- التحميل: قناة `fb-adlib:download` → `onAdLibDownload` في app.js → عناصر بـ `platform:'facebook-ad'`
+  + `downloadUrl` (scontent مباشر) + `kind`. السيرفر في `runDownloadOnce` عنده فرع `facebook-ad`
+  بينزّل **مباشر عبر downloadFile** (مش yt-dlp) — الصور مضمونة، فيديو scontent المباشر بيشتغل،
+  فيديو blob بيتخطّى بهدوء (Phase 2)
+- آمن ضد الحظر: بيشتغل بـ IP المستخدم في نافذته (مش سيرفر مركزي) — بيانات عامة
 
 ## ما يجب تجنبه
 - ❌ DOM scraping على TikTok (TikTok يرصد ويحظر)
