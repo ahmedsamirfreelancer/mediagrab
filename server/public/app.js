@@ -533,15 +533,12 @@
         payload.query = trimmed.replace(/^[@#]/, '');
       }
 
-      // Instagram keyword search: open the REAL instagram.com search in a
-      // window (mobile UA so Reels show) with a download button on every reel —
-      // exactly like TikTok. Nothing gets pulled into the in-app grid.
-      if (state.platform === 'instagram' && payload.mode === 'hashtag' && window.electronAPI?.instagram?.openSearchWindow) {
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
-        window.electronAPI.instagram.openSearchWindow(payload.query, base);
-        toast('فتحنا Instagram — دوس «تحميل» على أي ريل', 'info', 5000);
-        return;
-      }
+      // Instagram keyword search → the built-in Reels search (mobile clips API)
+      // rendered in MediaGrab's own clean grid. Reels/videos ONLY by nature, no
+      // photos/gaps/blank-pages, downloads + open-folder work like every other
+      // platform. (The live instagram.com window proved unworkable — Instagram's
+      // React app fights every layout change. We keep that code for TikTok only,
+      // whose video-search page is clean.) Falls through to apiCall('/search').
 
       // TikTok: open the REAL tiktok.com search in a window with download
       // buttons on every video — exact same results as the site, and nothing
