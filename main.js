@@ -803,10 +803,12 @@ ipcMain.handle('instagram:openSearchWindow', async (_evt, query, base) => {
   await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
 
   const win = new BrowserWindow({
-    // Mobile UA (below) makes Instagram serve its fluid phone layout — which
-    // fills whatever width it's given — so we can keep the Reels content but
-    // make the window wide like a desktop app instead of a skinny phone.
-    width: 980,
+    // Keep the width UNDER Instagram's ~736px tablet breakpoint: above it the
+    // mobile site flips to the desktop sidebar layout, whose keyword search
+    // hides Reels and just spins. At this width we stay in the clean phone
+    // Reels grid; curateGrid() in the preload re-flows it into more columns so
+    // it still feels wide. (700 ≈ as wide as we can go before the flip.)
+    width: 700,
     height: 940,
     title: 'Instagram — دوس «تحميل» على أي ريل',
     parent: mainWin || undefined,

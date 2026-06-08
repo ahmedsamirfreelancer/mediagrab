@@ -318,63 +318,20 @@ const { ipcRenderer } = require('electron');
     (document.head || document.documentElement).appendChild(s);
   }
 
-  // How many reels per row in the (now wide) window.
-  const IG_COLS = 5;
-
-  // The grid "cell" of a tile = the ancestor whose PARENT holds several tiles
-  // (i.e. the parent is the grid container, the cell is one of its children).
-  function cellOf(a) {
-    let el = a;
-    while (el.parentElement && el.parentElement !== document.body) {
-      const p = el.parentElement;
-      if (p.querySelectorAll('a[href*="/reel/"], a[href*="/p/"], a[href*="/tv/"]').length > 1) return el;
-      el = p;
-    }
-    return a;
-  }
-
-  // Reels-only + denser grid: hide every photo (/p/) tile, then re-flow the
-  // remaining reel/tv tiles into IG_COLS columns that fill our wide window.
-  // Also kills Instagram's "Use the app" bottom banner and the bottom nav bar
-  // (tapping those navigates to blank app-shell pages).
+  // NON-DESTRUCTIVE curation only. We learned the hard way that restyling
+  // Instagram's grid container or hiding its tiles makes its React app re-render
+  // and spin forever ("appeared then vanished, loads endlessly"). So we DON'T
+  // touch the grid/tiles — download buttons land on Reels only (addButtons),
+  // and here we just hide the fixed "Use the app" smart-banner, which is a
+  // standalone overlay that's safe to remove.
   function curateGrid() {
-    if (!onListingPage()) return;
-    const tiles = Array.prototype.slice.call(
-      document.querySelectorAll('a[href*="/reel/"], a[href*="/p/"], a[href*="/tv/"]')
-    ).filter((a) => a.querySelector('img') && !a.closest('[role="dialog"]'));
-    let container = null;
-    for (const a of tiles) {
-      const href = a.getAttribute('href') || '';
-      const isVideo = /\/(reel|tv)\//.test(href);
-      const cell = cellOf(a);
-      if (!isVideo) { cell.style.setProperty('display', 'none', 'important'); continue; }
-      const w = (100 / IG_COLS) + '%';
-      cell.style.setProperty('flex', '0 0 ' + w, 'important');
-      cell.style.setProperty('max-width', w, 'important');
-      cell.style.setProperty('width', w, 'important');
-      cell.style.setProperty('box-sizing', 'border-box', 'important');
-      cell.style.removeProperty('display');
-      if (!container) container = cell.parentElement;
-    }
-    if (container && container.dataset.mgGrid !== '1') {
-      container.style.setProperty('display', 'flex', 'important');
-      container.style.setProperty('flex-wrap', 'wrap', 'important');
-      container.style.setProperty('align-content', 'flex-start', 'important');
-      container.style.setProperty('justify-content', 'flex-start', 'important');
-      container.dataset.mgGrid = '1';
-    }
-    // Hide the "Use the app" / "Open in app" smart-banner and the bottom nav.
-    for (const el of document.querySelectorAll('div,section,nav')) {
-      if (el.closest('#mg-toolbar')) continue;
-      if (el.dataset.mgHidden === '1') continue;
-      const cs = getComputedStyle(el);
-      if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
-      const txt = (el.textContent || '').trim();
-      const isAppBanner = /Use the app|Open Instagram|Open in app|افتح التطبيق|استخدم التطبيق/i.test(txt) && txt.length < 60;
-      const isBottomNav = el.tagName === 'NAV' && parseFloat(cs.bottom) <= 4;
-      if (isAppBanner || isBottomNav) {
-        el.style.setProperty('display', 'none', 'important');
-        el.dataset.mgHidden = '1';
+    const banner = document.querySelector('[class*="smart"][class*="banner"], a[href*="app_store"], a[href*="play.google"]');
+    if (banner) {
+      const fixedAncestor = banner.closest('div,section');
+      const target = fixedAncestor && /fixed|sticky/.test(getComputedStyle(fixedAncestor).position) ? fixedAncestor : null;
+      if (target && target.dataset.mgHidden !== '1') {
+        target.style.setProperty('display', 'none', 'important');
+        target.dataset.mgHidden = '1';
       }
     }
   }
