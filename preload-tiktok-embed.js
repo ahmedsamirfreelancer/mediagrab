@@ -113,11 +113,30 @@ const { ipcRenderer } = require('electron');
     return 'background:' + bg + ';color:#fff;border:none;border-radius:8px;padding:7px 13px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;';
   }
 
-  // Make room for our fixed toolbar. body paddingTop handles normal-flow
-  // content, but TikTok's own top nav/search bar is position:fixed/sticky at
-  // top:0 — padding doesn't move it, so it hides under our toolbar. Bump every
-  // top-anchored fixed/sticky element down by the toolbar height too. Runs on
-  // every tick (idempotent via data attrs) so it survives TikTok re-renders.
+  // True when el's nearest scrollable ancestor is the window/document (body or
+  // html) rather than an inner overflow:scroll container. A sticky element
+  // sticks relative to its scroll container, so this tells us whose top:0 we
+  // must compensate for our toolbar — and whose we must leave alone.
+  function scrollAncestorIsWindow(el) {
+    let n = el.parentElement;
+    while (n && n !== document.body && n !== document.documentElement) {
+      const cs = getComputedStyle(n);
+      if (/(auto|scroll)/.test(cs.overflowY) || /(auto|scroll)/.test(cs.overflow)) return false;
+      n = n.parentElement;
+    }
+    return true;
+  }
+
+  // Make room for our fixed toolbar. body paddingTop pushes the whole document
+  // (and any inner scroll container, e.g. TikTok's <main> search grid) down by
+  // the toolbar height. But viewport-anchored bars — position:fixed, or sticky
+  // elements that stick to the WINDOW — ignore that padding and hide under our
+  // toolbar, so we bump their top to the toolbar height. Critically we must NOT
+  // bump the search Top/Users/Videos/Photo tab bar: it's sticky INSIDE <main>
+  // (an overflow:scroll container already offset by the body padding), so its
+  // top:0 is already right. Adding the toolbar height there double-counts it and
+  // pins the tabs a toolbar-height too low, with videos peeking above them.
+  // Runs every tick (idempotent) so it survives TikTok re-renders.
   function pushPageDown() {
     try {
       const bar = document.getElementById('mg-toolbar');
@@ -128,11 +147,10 @@ const { ipcRenderer } = require('electron');
         if (el.id === 'mg-toolbar' || el.closest('#mg-toolbar')) continue;
         const cs = getComputedStyle(el);
         if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+        // Sticky-in-an-inner-scroller is already offset by the body padding.
+        if (cs.position === 'sticky' && !scrollAncestorIsWindow(el)) continue;
         const top = parseFloat(cs.top);
         if (!isFinite(top) || top > 80) continue; // only near-top anchored bars
-        // Pin every top-anchored bar to exactly our toolbar height — NOT
-        // base+h, which over-pushes bars TikTok already offset (e.g. the
-        // Top/Users/Videos tabs), leaving a gap with videos peeking above them.
         const want = h + 'px';
         if (el.style.top !== want) el.style.top = want;
       }
