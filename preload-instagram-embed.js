@@ -319,16 +319,12 @@ const { ipcRenderer } = require('electron');
       if (a.closest('[role="dialog"]')) continue;
       // Grid thumbnails only — real cards wrap an <img>.
       if (!a.querySelector('img')) continue;
-      // VIDEOS ONLY: hide any photo tile so the grid shows Reels/videos only.
+      // We DON'T hide photos (Instagram's grid leaves holes when tiles are
+      // hidden). Instead every tile gets a type badge so the user can tell
+      // videos from photo posts at a glance.
       const cell = cellOf(a);
-      if (!isVideoTile(a, cell)) {
-        if (cell && cell.dataset.mgHide !== '1') {
-          cell.style.setProperty('display', 'none', 'important');
-          cell.dataset.mgHide = '1';
-        }
-        continue;
-      }
-      // Exactly ONE button per item.
+      const isVid = isVideoTile(a, cell);
+      // Exactly ONE set of controls per item.
       if (document.querySelector('.' + BTN_CLASS + '[data-vid="' + id + '"]')) continue;
       const url = 'https://www.instagram.com/' + kind + '/' + id + '/';
       if (getComputedStyle(a).position === 'static') a.style.position = 'relative';
@@ -350,6 +346,14 @@ const { ipcRenderer } = require('electron');
         setTimeout(() => applyState(btn), 2500);
       }, true);
       a.appendChild(btn);
+
+      // Video vs photo badge (bottom-left, clear of the button + checkbox).
+      const badge = document.createElement('div');
+      badge.className = 'mg-type';
+      badge.setAttribute('data-vid', id);
+      badge.textContent = isVid ? '🎬 فيديو' : '📷 صورة';
+      badge.style.cssText = 'position:absolute;bottom:8px;left:8px;z-index:50;padding:3px 8px;border-radius:7px;font-size:11px;font-weight:700;color:#fff;direction:rtl;box-shadow:0 1px 4px rgba(0,0,0,.6);background:' + (isVid ? '#16a34a' : '#6b7280') + ';';
+      a.appendChild(badge);
 
       const cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -373,8 +377,7 @@ const { ipcRenderer } = require('electron');
     s.textContent =
       '.mg-sel{display:none!important;}' +
       'html.mg-selecting .mg-sel{display:inline-block!important;}' +
-      '.mg-hide-btns .mg-dl-btn{display:none!important;}' +
-      '.mg-hide-btns .mg-sel{display:none!important;}';
+      '.mg-hide-btns .mg-dl-btn,.mg-hide-btns .mg-sel,.mg-hide-btns .mg-type{display:none!important;}';
     (document.head || document.documentElement).appendChild(s);
   }
 
@@ -394,17 +397,28 @@ const { ipcRenderer } = require('electron');
         target.dataset.mgHidden = '1';
       }
     }
-    // Hide Instagram's fixed BOTTOM nav bar (home/search/reels/…) — our grid's
+    // Hide Instagram's fixed BOTTOM nav bar (home/search/reels/…) — the grid's
     // bottom row of «تحميل» buttons was colliding with it, and tapping it just
-    // navigates to blank app-shell pages. It's a standalone fixed overlay, so
-    // removing it is safe (doesn't touch the scrolling grid).
-    const navs = document.querySelectorAll('nav, [role="navigation"]');
-    for (const nav of navs) {
-      if (nav.closest('#mg-toolbar') || nav.dataset.mgHidden === '1') continue;
-      const cs = getComputedStyle(nav);
-      if (cs.position === 'fixed' && parseFloat(cs.bottom) <= 4) {
-        nav.style.setProperty('display', 'none', 'important');
-        nav.dataset.mgHidden = '1';
+    // goes to blank app-shell pages. The nav isn't a <nav> with bottom:0 we can
+    // match directly, so we find the home link (a[href="/"]) and walk up to its
+    // fixed, viewport-bottom-anchored ancestor — that's the bar. Safe to hide
+    // (standalone overlay, not the scrolling grid).
+    for (const home of document.querySelectorAll('a[href="/"], a[href="/explore/"], a[href^="/reels"]')) {
+      let el = home;
+      while (el && el !== document.body) {
+        const cs = getComputedStyle(el);
+        if (cs.position === 'fixed') {
+          const r = el.getBoundingClientRect();
+          const atBottom = Math.abs(window.innerHeight - r.bottom) < 8;
+          if (atBottom && r.height > 0 && r.height < 110 && r.width > window.innerWidth * 0.5) {
+            if (el.dataset.mgHidden !== '1') {
+              el.style.setProperty('display', 'none', 'important');
+              el.dataset.mgHidden = '1';
+            }
+          }
+          break;
+        }
+        el = el.parentElement;
       }
     }
   }
