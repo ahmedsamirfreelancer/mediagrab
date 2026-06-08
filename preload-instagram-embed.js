@@ -352,7 +352,8 @@ const { ipcRenderer } = require('electron');
       badge.className = 'mg-type';
       badge.setAttribute('data-vid', id);
       badge.textContent = isVid ? '🎬 فيديو' : '📷 صورة';
-      badge.style.cssText = 'position:absolute;bottom:8px;left:8px;z-index:50;padding:3px 8px;border-radius:7px;font-size:11px;font-weight:700;color:#fff;direction:rtl;box-shadow:0 1px 4px rgba(0,0,0,.6);background:' + (isVid ? '#16a34a' : '#6b7280') + ';';
+      // Directly under the «تحميل» button (top-left), so it never blocks the view.
+      badge.style.cssText = 'position:absolute;top:42px;left:8px;z-index:50;padding:3px 8px;border-radius:7px;font-size:11px;font-weight:700;color:#fff;direction:rtl;box-shadow:0 1px 4px rgba(0,0,0,.6);background:' + (isVid ? '#16a34a' : '#6b7280') + ';';
       a.appendChild(badge);
 
       const cb = document.createElement('input');
