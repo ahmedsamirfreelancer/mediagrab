@@ -52,6 +52,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   image: {
     reverseSearch: (bytes, mime) => ipcRenderer.invoke('image:reverseSearch', bytes, mime),
   },
+  // App version for the header badge (always matches the real build).
+  app: {
+    version: () => ipcRenderer.invoke('app:getVersion'),
+  },
   // License info (read-only; activation happens at the gate before this window opens)
   license: {
     getStatus: () => ipcRenderer.invoke('license:getStatus'),

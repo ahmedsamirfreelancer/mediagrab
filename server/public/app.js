@@ -3381,6 +3381,13 @@
     bindFacebookLoginButtons();
     bindAdLibrary();
     bindTiktokLoginButtons();
+    // Show the real app version in the header badge (never goes stale).
+    if (window.electronAPI?.app?.version) {
+      window.electronAPI.app.version().then((v) => {
+        const el = document.getElementById('version-badge');
+        if (el && v) el.textContent = 'v' + v;
+      }).catch(() => {});
+    }
     bindTiktokEmbed();
     bindBatchModal();
     bindCookieImportButtons();

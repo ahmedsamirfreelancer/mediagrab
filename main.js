@@ -1000,6 +1000,9 @@ ipcMain.handle('fb-adlib:openExternal', async (_evt, url) => {
   catch (e) { return { success: false, error: e.message }; }
 });
 
+// Real app version for the header badge (so it never goes stale per release).
+ipcMain.handle('app:getVersion', () => { try { return app.getVersion(); } catch { return ''; } });
+
 ipcMain.on('facebook-embed:download', (_evt, payload) => {
   const hasWork = payload && (payload.url || (Array.isArray(payload.urls) && payload.urls.length));
   if (mainWin && hasWork) {
