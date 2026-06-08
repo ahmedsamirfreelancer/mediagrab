@@ -183,16 +183,36 @@ const { ipcRenderer } = require('electron');
     });
     row2.appendChild(dlAll);
 
+    // «تحديد» toggle — turns multi-select mode on/off. Off by default, so the
+    // grid shows clean thumbnails with no checkboxes until the user asks.
+    const selToggle = document.createElement('button');
+    selToggle.id = 'mg-sel-toggle';
+    selToggle.textContent = '☑ تحديد';
+    selToggle.title = 'يفعّل وضع التحديد عشان تعلّم على كذا فيديو وتحمّلهم مرة واحدة';
+    selToggle.style.cssText = btnStyle('#0ea5e9');
+    row2.appendChild(selToggle);
+
     const selBtn = document.createElement('button');
     selBtn.id = 'mg-sel-btn';
     selBtn.textContent = '⬇ حمّل المحدد (0)';
     selBtn.title = 'يحمّل الريلز اللي علّمت عليها (✓ في الركن)';
-    selBtn.style.cssText = btnStyle('#9333ea');
+    selBtn.style.cssText = btnStyle('#9333ea') + 'display:none;';
     selBtn.addEventListener('click', () => {
       const n = downloadSelected();
       if (n > 0) { selBtn.textContent = '✓ ضفنا ' + n; setTimeout(updateSelCount, 2500); }
     });
     row2.appendChild(selBtn);
+
+    selToggle.addEventListener('click', () => {
+      const on = document.documentElement.classList.toggle('mg-selecting');
+      selToggle.textContent = on ? '✓ خلّصت تحديد' : '☑ تحديد';
+      selToggle.style.background = on ? '#0369a1' : '#0ea5e9';
+      selBtn.style.display = on ? '' : 'none';
+      if (!on) { // leaving select mode → clear ticks
+        for (const cb of document.querySelectorAll('.mg-sel:checked')) cb.checked = false;
+        updateSelCount();
+      }
+    });
 
     const reset = document.createElement('button');
     reset.textContent = '↺ صفّر العلامات';
@@ -261,12 +281,36 @@ const { ipcRenderer } = require('electron');
     return !onSingleItem();
   }
 
+  // The grid "cell" of a tile = the ancestor whose PARENT holds several tiles.
+  function cellOf(a) {
+    let el = a;
+    while (el.parentElement && el.parentElement !== document.body) {
+      const p = el.parentElement;
+      if (p.querySelectorAll('a[href*="/reel/"], a[href*="/tv/"], a[href*="/p/"]').length > 1) return el;
+      el = p;
+    }
+    return a;
+  }
+
+  // Is this grid tile a VIDEO (reel/IGTV/video-post) vs a photo? /reel/ and
+  // /tv/ are always video. For /p/ we look in the whole cell for the play/clip
+  // icon Instagram overlays on video thumbnails (or a <video>). Photos have no
+  // such indicator. We scope to the cell because the icon often sits as a
+  // sibling of the <a>, not inside it.
+  function isVideoTile(a, cell) {
+    if (/\/(reel|tv)\//.test(a.getAttribute('href') || '')) return true;
+    const scope = cell || a;
+    if (scope.querySelector('video')) return true;
+    for (const el of scope.querySelectorAll('[aria-label]')) {
+      const l = (el.getAttribute('aria-label') || '').toLowerCase();
+      if (/clip|reel|\bvideo\b|\bplay\b|مقطع|ريل|فيديو/.test(l)) return true;
+    }
+    return false;
+  }
+
   function addButtons() {
     // Show grid buttons everywhere except the single-item viewer.
     if (onSingleItem()) return;
-    // Reels/IGTV plus posts — on profile grids even videos are linked as /p/,
-    // so we must include /p/ or most videos get NO button. (yt-dlp grabs the
-    // video from a /p/ link; if a /p/ turns out to be a photo it's skipped.)
     for (const a of document.querySelectorAll('a[href*="/reel/"], a[href*="/tv/"], a[href*="/p/"]')) {
       const m = (a.getAttribute('href') || '').match(/\/(reel|tv|p)\/([^/?]+)/);
       if (!m) continue;
@@ -275,6 +319,15 @@ const { ipcRenderer } = require('electron');
       if (a.closest('[role="dialog"]')) continue;
       // Grid thumbnails only — real cards wrap an <img>.
       if (!a.querySelector('img')) continue;
+      // VIDEOS ONLY: hide any photo tile so the grid shows Reels/videos only.
+      const cell = cellOf(a);
+      if (!isVideoTile(a, cell)) {
+        if (cell && cell.dataset.mgHide !== '1') {
+          cell.style.setProperty('display', 'none', 'important');
+          cell.dataset.mgHide = '1';
+        }
+        continue;
+      }
       // Exactly ONE button per item.
       if (document.querySelector('.' + BTN_CLASS + '[data-vid="' + id + '"]')) continue;
       const url = 'https://www.instagram.com/' + kind + '/' + id + '/';
@@ -314,7 +367,14 @@ const { ipcRenderer } = require('electron');
     if (document.getElementById('mg-style')) return;
     const s = document.createElement('style');
     s.id = 'mg-style';
-    s.textContent = '.mg-hide-btns .mg-dl-btn,.mg-hide-btns .mg-sel{display:none!important;}';
+    // Selection checkboxes are HIDDEN by default — they only appear once the
+    // user turns on «تحديد» (multi-select) mode. The per-tile «تحميل» button
+    // stays visible for one-click single downloads.
+    s.textContent =
+      '.mg-sel{display:none!important;}' +
+      'html.mg-selecting .mg-sel{display:inline-block!important;}' +
+      '.mg-hide-btns .mg-dl-btn{display:none!important;}' +
+      '.mg-hide-btns .mg-sel{display:none!important;}';
     (document.head || document.documentElement).appendChild(s);
   }
 
@@ -332,6 +392,19 @@ const { ipcRenderer } = require('electron');
       if (target && target.dataset.mgHidden !== '1') {
         target.style.setProperty('display', 'none', 'important');
         target.dataset.mgHidden = '1';
+      }
+    }
+    // Hide Instagram's fixed BOTTOM nav bar (home/search/reels/…) — our grid's
+    // bottom row of «تحميل» buttons was colliding with it, and tapping it just
+    // navigates to blank app-shell pages. It's a standalone fixed overlay, so
+    // removing it is safe (doesn't touch the scrolling grid).
+    const navs = document.querySelectorAll('nav, [role="navigation"]');
+    for (const nav of navs) {
+      if (nav.closest('#mg-toolbar') || nav.dataset.mgHidden === '1') continue;
+      const cs = getComputedStyle(nav);
+      if (cs.position === 'fixed' && parseFloat(cs.bottom) <= 4) {
+        nav.style.setProperty('display', 'none', 'important');
+        nav.dataset.mgHidden = '1';
       }
     }
   }

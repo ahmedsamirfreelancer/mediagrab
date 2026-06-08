@@ -192,16 +192,36 @@ const { ipcRenderer } = require('electron');
     });
     row2.appendChild(dlAll);
 
+    // «تحديد» toggle — multi-select mode is off by default (clean grid, no
+    // checkboxes) until the user clicks it.
+    const selToggle = document.createElement('button');
+    selToggle.id = 'mg-sel-toggle';
+    selToggle.textContent = '☑ تحديد';
+    selToggle.title = 'يفعّل وضع التحديد عشان تعلّم على كذا فيديو وتحمّلهم مرة واحدة';
+    selToggle.style.cssText = btnStyle('#0ea5e9');
+    row2.appendChild(selToggle);
+
     const selBtn = document.createElement('button');
     selBtn.id = 'mg-sel-btn';
     selBtn.textContent = '⬇ حمّل المحدد (0)';
     selBtn.title = 'يحمّل الفيديوهات اللي علّمت عليها (✓ في الركن)';
-    selBtn.style.cssText = btnStyle('#9333ea');
+    selBtn.style.cssText = btnStyle('#9333ea') + 'display:none;';
     selBtn.addEventListener('click', () => {
       const n = downloadSelected();
       if (n > 0) { selBtn.textContent = '✓ ضفنا ' + n; setTimeout(updateSelCount, 2500); }
     });
     row2.appendChild(selBtn);
+
+    selToggle.addEventListener('click', () => {
+      const on = document.documentElement.classList.toggle('mg-selecting');
+      selToggle.textContent = on ? '✓ خلّصت تحديد' : '☑ تحديد';
+      selToggle.style.background = on ? '#0369a1' : '#0ea5e9';
+      selBtn.style.display = on ? '' : 'none';
+      if (!on) {
+        for (const cb of document.querySelectorAll('.mg-sel:checked')) cb.checked = false;
+        updateSelCount();
+      }
+    });
 
     const reset = document.createElement('button');
     reset.textContent = '↺ صفّر العلامات';
@@ -316,7 +336,13 @@ const { ipcRenderer } = require('electron');
     if (document.getElementById('mg-style')) return;
     const s = document.createElement('style');
     s.id = 'mg-style';
-    s.textContent = '.mg-hide-btns .mg-dl-btn,.mg-hide-btns .mg-sel{display:none!important;}';
+    // Selection checkboxes are HIDDEN until the user turns on «تحديد» mode;
+    // the per-video «تحميل» button stays for one-click single downloads.
+    s.textContent =
+      '.mg-sel{display:none!important;}' +
+      'html.mg-selecting .mg-sel{display:inline-block!important;}' +
+      '.mg-hide-btns .mg-dl-btn{display:none!important;}' +
+      '.mg-hide-btns .mg-sel{display:none!important;}';
     (document.head || document.documentElement).appendChild(s);
   }
 
