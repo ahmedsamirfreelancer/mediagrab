@@ -250,6 +250,22 @@ const { ipcRenderer } = require('electron');
     });
     row2.appendChild(curBtn);
 
+    // Prev/Next — walk through the reels in the SAME order they were in the
+    // grid (saved to sessionStorage), independent of Instagram's own viewer.
+    const prevBtn = document.createElement('button');
+    prevBtn.id = 'mg-prev-btn';
+    prevBtn.textContent = '⏮ السابق';
+    prevBtn.style.cssText = btnStyle('#4b5563') + 'display:none;';
+    prevBtn.addEventListener('click', () => navReel(-1));
+    row2.appendChild(prevBtn);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.id = 'mg-next-btn';
+    nextBtn.textContent = 'التالي ⏭';
+    nextBtn.style.cssText = btnStyle('#4b5563') + 'display:none;';
+    nextBtn.addEventListener('click', () => navReel(1));
+    row2.appendChild(nextBtn);
+
     const spacer = document.createElement('span');
     spacer.style.flex = '1';
     row2.appendChild(spacer);
@@ -382,7 +398,9 @@ const { ipcRenderer } = require('electron');
     s.textContent =
       '.mg-sel{display:none!important;}' +
       'html.mg-selecting .mg-sel{display:inline-block!important;}' +
-      '.mg-hide-btns .mg-dl-btn,.mg-hide-btns .mg-sel,.mg-hide-btns .mg-type{display:none!important;}';
+      '.mg-hide-btns .mg-dl-btn,.mg-hide-btns .mg-sel,.mg-hide-btns .mg-type{display:none!important;}' +
+      // When a single reel is open, center its column in the window.
+      'html.mg-single [role="main"]{display:flex!important;flex-direction:column!important;align-items:center!important;}';
     (document.head || document.documentElement).appendChild(s);
   }
 
@@ -467,12 +485,44 @@ const { ipcRenderer } = require('electron');
     location.reload();
   }
 
+  // Save the order of reels currently in the grid so the viewer's prev/next can
+  // walk them even after a full page navigation into a single reel.
+  function collectReelOrder() {
+    if (onSingleItem()) return;
+    const btns = document.querySelectorAll('.' + BTN_CLASS + '[data-url]');
+    if (!btns.length) return;
+    const urls = [];
+    for (const b of btns) { const u = b.getAttribute('data-url'); if (u) urls.push(u); }
+    try { sessionStorage.setItem('mg_reel_order', JSON.stringify(urls)); } catch {}
+  }
+
+  function navReel(dir) {
+    let order = [];
+    try { order = JSON.parse(sessionStorage.getItem('mg_reel_order') || '[]'); } catch {}
+    if (!order.length) return;
+    const m = location.pathname.match(/\/(reel|p|tv)\/([^/?]+)/);
+    if (!m) return;
+    const curId = m[2];
+    let idx = order.findIndex((u) => u.indexOf('/' + curId + '/') !== -1);
+    if (idx < 0) idx = 0;
+    const t = idx + dir;
+    if (t < 0 || t >= order.length) return;
+    location.assign(order[t]);
+  }
+
   function tick() {
     try {
       injectStyle();
       injectToolbar();
       pushPageDown();
       checkBlankReload();
+      collectReelOrder();
+      const single = onSingleItem();
+      document.documentElement.classList.toggle('mg-single', single);
+      const pv = document.getElementById('mg-prev-btn');
+      const nx = document.getElementById('mg-next-btn');
+      if (pv) pv.style.display = single ? '' : 'none';
+      if (nx) nx.style.display = single ? '' : 'none';
       // Hide grid buttons when a single item is open so they don't bleed over
       // Instagram's full-screen reel viewer.
       const listingNow = onListingPage();

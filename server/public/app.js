@@ -2096,7 +2096,7 @@
     $$('.platform-tab').forEach((tab) => {
       tab.classList.toggle('active', tab.dataset.platform === platform);
     });
-    const searchable = ['tiktok', 'youtube', 'instagram'];
+    const searchable = ['tiktok', 'youtube', 'instagram', 'facebook'];
     dom.searchSection.style.display = searchable.includes(platform) ? '' : 'none';
 
     // Update search placeholder per platform.
