@@ -800,7 +800,14 @@ const IG_MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) App
 ipcMain.handle('instagram:openSearchWindow', async (_evt, query, base) => {
   lastEmbedBase = base || lastEmbedBase || '';
   const ses = session.fromPartition(IG_SESSION_PARTITION);
-  await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
+  // The persistent partition is the source of truth once a real login exists.
+  // ONLY seed it from the cookies file when the live session has no sessionid
+  // — otherwise every search overwrites a freshly-rotated/relogged sessionid
+  // with the stale file snapshot, which bounces the user back to the login
+  // screen again and again (the "logs in then out every time" loop).
+  if (!(await isInstagramLoggedIn())) {
+    await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
+  }
 
   const win = new BrowserWindow({
     // Keep the width UNDER Instagram's ~736px tablet breakpoint: above it the
@@ -824,6 +831,12 @@ ipcMain.handle('instagram:openSearchWindow', async (_evt, query, base) => {
   // Spoof a phone for every request this window makes (page + XHR), so
   // Instagram's keyword search returns Reels.
   try { win.webContents.setUserAgent(IG_MOBILE_UA); } catch {}
+  // If the user (re)logs in via Instagram's one-tap screen inside this window,
+  // refresh the cookies file from the now-current session so yt-dlp downloads
+  // keep working and a later search doesn't re-inject a dead sessionid.
+  win.webContents.on('did-navigate', async () => {
+    try { if (await isInstagramLoggedIn()) await persistInstagramCookies(); } catch {}
+  });
   const url = `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(query || '')}`;
   win.loadURL(url, { userAgent: IG_MOBILE_UA });
   return { success: true };
