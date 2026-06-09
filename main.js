@@ -851,7 +851,11 @@ ipcMain.handle('instagram:openSearchWindow', async (_evt, query, base) => {
 // A download button inside the embedded Instagram window was clicked — forward
 // the reel/post URL + folder to the main window's normal download queue.
 ipcMain.on('instagram-embed:download', (_evt, payload) => {
-  const hasWork = payload && (payload.url || (Array.isArray(payload.urls) && payload.urls.length));
+  const hasWork = payload && (
+    payload.url ||
+    (Array.isArray(payload.urls) && payload.urls.length) ||
+    (Array.isArray(payload.items) && payload.items.length)
+  );
   if (mainWin && hasWork) {
     mainWin.webContents.send('instagram-embed:download', payload);
   }

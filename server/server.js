@@ -852,16 +852,24 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
 
     const { speedLimitKBps = 0, downloadSubs = false, cookiesFile = '', customArgs = '' } = opts;
     const effectiveQuality = opts.taskQuality || quality;
+    // A photo post (single image or a carousel of images). We let yt-dlp pick
+    // the real extension (.jpg/.webp) and download every carousel slide instead
+    // of forcing an mp4 video stream.
+    const isPhoto = opts.kind === 'photo';
 
     const safeName = sanitizeFilename(filenameBase || title || '%(title)s');
-    const ext = effectiveQuality === 'audio' ? '%(ext)s' : 'mp4';
-    const outputTemplate = path.join(outputDir, `${safeName}.${ext}`);
+    const ext = (effectiveQuality === 'audio' || isPhoto) ? '%(ext)s' : 'mp4';
+    // Carousels yield several files; suffix an index so they don't collide.
+    const nameTpl = isPhoto ? `${safeName}_%(autonumber)02d` : safeName;
+    const outputTemplate = path.join(outputDir, `${nameTpl}.${ext}`);
 
     const args = [
       ytdlpUrl,
-      '-f', buildYtdlpFormat(effectiveQuality),
+      '-f', isPhoto ? 'best' : buildYtdlpFormat(effectiveQuality),
       '-o', outputTemplate,
-      '--no-playlist',
+      // Photos may be carousels — DON'T pass --no-playlist for them, so every
+      // slide is pulled; videos stay single-item.
+      ...(isPhoto ? [] : ['--no-playlist']),
       '--newline',
       '--no-warnings',
       '--no-overwrites',
@@ -873,7 +881,10 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
       '--user-agent', YTDLP_UA,
       '--sleep-requests', '1',
     ];
-    if (effectiveQuality !== 'audio') {
+    if (isPhoto) {
+      // Image post: nothing video-specific. No mp4 merge, no duration filter
+      // (that would reject the images we actually want here).
+    } else if (effectiveQuality !== 'audio') {
       args.push('--merge-output-format', 'mp4');
       // For Instagram in particular yt-dlp will happily return image
       // carousel slots as the "best format" — explicitly require a video
@@ -1568,7 +1579,7 @@ async function runDownloadOnce(task, entry, ctx) {
   } else {
     filePath = await ytdlpDownload(task.url, taskOutputDir, task.id, task.title, quality, filenameBase, {
       speedLimitKBps, downloadSubs, cookiesFile, customArgs,
-      taskQuality: task.quality,
+      taskQuality: task.quality, kind: task.kind,
     });
   }
 

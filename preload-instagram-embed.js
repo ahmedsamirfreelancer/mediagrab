@@ -44,16 +44,16 @@ const { ipcRenderer } = require('electron');
   // Queue every visible reel/post as ONE batch (so Stop can cancel them together).
   function downloadAllVisible() {
     const folder = currentFolder();
-    const urls = [];
+    const items = [];
     for (const btn of document.querySelectorAll('.' + BTN_CLASS + '[data-vid]')) {
       const url = btn.getAttribute('data-url');
       if (!url) continue;
-      urls.push(url);
+      items.push({ url, kind: btn.getAttribute('data-kind') || 'video' });
       btn.dataset.done = '1';
       applyState(btn);
     }
-    if (urls.length) ipcRenderer.send('instagram-embed:download', { urls, folder });
-    return urls.length;
+    if (items.length) ipcRenderer.send('instagram-embed:download', { items, folder });
+    return items.length;
   }
 
   function updateSelCount() {
@@ -67,18 +67,18 @@ const { ipcRenderer } = require('electron');
     if (!checked.length) { alert('محدّدتش أي حاجة. علّم على الريلز الأول (✓ في الركن).'); return 0; }
     if (!confirm('هتحمّل ' + checked.length + ' عنصر محدد. متأكد؟')) return 0;
     const folder = currentFolder();
-    const urls = [];
+    const items = [];
     for (const cb of checked) {
       const url = cb.getAttribute('data-url');
       if (!url) continue;
-      urls.push(url);
+      items.push({ url, kind: cb.getAttribute('data-kind') || 'video' });
       const btn = document.querySelector('.' + BTN_CLASS + '[data-vid="' + cb.getAttribute('data-vid') + '"]');
       if (btn) { btn.dataset.done = '1'; applyState(btn); }
       cb.checked = false;
     }
-    if (urls.length) ipcRenderer.send('instagram-embed:download', { urls, folder });
+    if (items.length) ipcRenderer.send('instagram-embed:download', { items, folder });
     updateSelCount();
-    return urls.length;
+    return items.length;
   }
 
   async function resetMarks() {
@@ -244,7 +244,10 @@ const { ipcRenderer } = require('electron');
       const m = location.pathname.match(/\/(reel|p|tv)\/([^/?]+)/);
       if (!m) return;
       const url = 'https://www.instagram.com/' + m[1] + '/' + m[2] + '/';
-      ipcRenderer.send('instagram-embed:download', { url, folder: currentFolder() });
+      // /reel/ and /tv/ are always video; for /p/ check if a <video> is on the
+      // open post — otherwise treat it as a photo so the server pulls the image.
+      const kind = (m[1] === 'p' && !document.querySelector('video')) ? 'photo' : 'video';
+      ipcRenderer.send('instagram-embed:download', { items: [{ url, kind }], folder: currentFolder() });
       curBtn.textContent = '✓ في الطابور';
       setTimeout(() => { curBtn.textContent = '⬇ حمّل المفتوح'; }, 2500);
     });
@@ -344,21 +347,26 @@ const { ipcRenderer } = require('electron');
       // Exactly ONE decoration per item (badge is on every tile, so key on it).
       if (document.querySelector('.mg-type[data-vid="' + id + '"]')) continue;
       const url = 'https://www.instagram.com/' + kind + '/' + id + '/';
+      const itemKind = isVid ? 'video' : 'photo';
       if (getComputedStyle(a).position === 'static') a.style.position = 'relative';
 
-      if (isVid) {
+      // Both videos AND photos get a download button + select checkbox. Photos
+      // download as images (yt-dlp pulls the post's image / all carousel slides);
+      // data-kind tells the server which pipeline to use.
+      {
         const btn = document.createElement('button');
         btn.className = BTN_CLASS;
         btn.setAttribute('data-vid', id);
         btn.setAttribute('data-url', url);
-        btn.style.cssText = 'position:absolute;top:8px;left:8px;z-index:50;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5);';
+        btn.setAttribute('data-kind', itemKind);
+        btn.style.cssText = 'position:absolute;top:8px;left:8px;z-index:50;background:' + (isVid ? '#7c3aed' : '#0891b2') + ';color:#fff;border:none;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5);';
         if (downloadedSet.has(id)) btn.dataset.done = '1';
         applyState(btn);
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
           const folder = currentFolder();
-          ipcRenderer.send('instagram-embed:download', { url, folder });
+          ipcRenderer.send('instagram-embed:download', { items: [{ url, kind: itemKind }], folder });
           btn.dataset.done = '1';
           btn.textContent = '✓ في الطابور';
           btn.style.background = '#16a34a';
@@ -371,19 +379,19 @@ const { ipcRenderer } = require('electron');
         cb.className = 'mg-sel';
         cb.setAttribute('data-vid', id);
         cb.setAttribute('data-url', url);
+        cb.setAttribute('data-kind', itemKind);
         cb.style.cssText = 'position:absolute;top:8px;right:8px;z-index:50;width:22px;height:22px;cursor:pointer;accent-color:#9333ea;';
         cb.addEventListener('click', (e) => e.stopPropagation(), true);
         cb.addEventListener('change', updateSelCount);
         a.appendChild(cb);
       }
 
-      // Type badge — on videos it sits under the «تحميل» button; on photos
-      // (no button) it sits at the very top corner.
+      // Type badge — sits just under the «تحميل» button on every tile.
       const badge = document.createElement('div');
       badge.className = 'mg-type';
       badge.setAttribute('data-vid', id);
       badge.textContent = isVid ? '🎬 فيديو' : '📷 صورة';
-      badge.style.cssText = 'position:absolute;top:' + (isVid ? '42' : '8') + 'px;left:8px;z-index:50;padding:3px 8px;border-radius:7px;font-size:11px;font-weight:700;color:#fff;direction:rtl;box-shadow:0 1px 4px rgba(0,0,0,.6);background:' + (isVid ? '#16a34a' : '#6b7280') + ';';
+      badge.style.cssText = 'position:absolute;top:42px;left:8px;z-index:50;padding:3px 8px;border-radius:7px;font-size:11px;font-weight:700;color:#fff;direction:rtl;box-shadow:0 1px 4px rgba(0,0,0,.6);background:' + (isVid ? '#16a34a' : '#6b7280') + ';';
       a.appendChild(badge);
     }
   }
@@ -456,11 +464,34 @@ const { ipcRenderer } = require('electron');
     if (y > 0) mgScrollY = y;
   }
   window.addEventListener('scroll', saveScroll, true);
+  // While we're auto-restoring the scroll position, ANY real user input (wheel,
+  // touch, arrow/space/pageup keys) means "I'm taking over" — so we cancel the
+  // remaining restore steps instead of yanking the user back up to the old spot.
+  // We listen for genuine input events only; a programmatic scrollTo() doesn't
+  // fire wheel/touch/key, so our own restore never cancels itself.
+  let mgRestoreTimers = [];
+  let mgUserGrabbed = false;
+  function cancelRestore() {
+    mgUserGrabbed = true;
+    for (const t of mgRestoreTimers) clearTimeout(t);
+    mgRestoreTimers = [];
+  }
+  for (const ev of ['wheel', 'touchstart', 'touchmove', 'keydown']) {
+    window.addEventListener(ev, (e) => {
+      if (ev === 'keydown') {
+        const k = e.key || '';
+        if (!/Arrow|Page|Home|End| /.test(k) && k !== 'Spacebar') return;
+      }
+      if (mgRestoreTimers.length) cancelRestore();
+    }, { passive: true, capture: true });
+  }
   function restoreScrollSoon() {
     const y = mgScrollY;
     if (y <= 0) return;
-    [80, 250, 550, 1000, 1600].forEach((t) => setTimeout(() => {
-      if (!onListingPage()) return;
+    mgUserGrabbed = false;
+    for (const t of mgRestoreTimers) clearTimeout(t);
+    mgRestoreTimers = [80, 250, 550, 1000, 1600].map((t) => setTimeout(() => {
+      if (mgUserGrabbed || !onListingPage()) return;
       try {
         window.scrollTo(0, y);
         if (document.scrollingElement) document.scrollingElement.scrollTop = y;

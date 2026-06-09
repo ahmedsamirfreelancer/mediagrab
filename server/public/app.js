@@ -2577,11 +2577,22 @@
         if (!data) return;
         const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
         const sub = (data.folder || '').trim();
-        const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
-        if (!urls.length) return;
-        const items = urls.map((u) => {
+        // New payload shape carries a kind ('video'|'photo') per item; fall back
+        // to the old url/urls shape (all treated as video) for compatibility.
+        const raw = Array.isArray(data.items) ? data.items
+          : (Array.isArray(data.urls) ? data.urls.map((u) => ({ url: u, kind: 'video' }))
+          : (data.url ? [{ url: data.url, kind: data.kind || 'video' }] : []));
+        if (!raw.length) return;
+        const items = raw.map((it) => {
+          const u = it.url;
           const m = u.match(/\/(reel|tv|p)\/([^/?]+)/);
-          return { id: undefined, url: u, title: m ? ('instagram_' + m[2]) : u, platform: 'instagram' };
+          return {
+            id: undefined,
+            url: u,
+            kind: it.kind || 'video',
+            title: m ? ('instagram_' + m[2]) : u,
+            platform: 'instagram',
+          };
         });
         startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
       });
