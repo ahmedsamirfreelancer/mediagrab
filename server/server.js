@@ -292,6 +292,46 @@ function isInstagramUrl(u) {
   } catch { return false; }
 }
 
+// Instagram shortcodes (the /p/<code>/ part) are a base64 encoding of the
+// numeric media id. Decode it so we can hit the media-info API, which — unlike
+// yt-dlp — returns IMAGE posts (yt-dlp's IG extractor only does videos and
+// refuses photo posts with "There is no video in this post").
+const IG_SC_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+function instagramShortcodeToMediaId(shortcode) {
+  let id = 0n;
+  for (const ch of shortcode) {
+    const v = IG_SC_ALPHABET.indexOf(ch);
+    if (v < 0) return null;
+    id = id * 64n + BigInt(v);
+  }
+  return id.toString();
+}
+
+// Resolve a photo post into its full-resolution image URLs (one per carousel
+// slide). Returns [] for videos / on failure so the caller can fall back.
+async function instagramResolvePhotoUrls(postUrl, cookiesFile) {
+  const m = String(postUrl).match(/\/(?:p|reel|tv)\/([^/?]+)/);
+  if (!m) return [];
+  const mediaId = instagramShortcodeToMediaId(m[1]);
+  if (!mediaId) return [];
+  const cookies = parseNetscapeCookies(cookiesFile);
+  if (!cookies.sessionid) return [];
+  const data = await instagramApiGet(`https://i.instagram.com/api/v1/media/${mediaId}/info/`, cookies);
+  const item = (data.items && data.items[0]) || null;
+  if (!item) return [];
+  const slides = item.carousel_media || [item];
+  const urls = [];
+  for (const s of slides) {
+    // Pick the highest-resolution image candidate (first is usually largest).
+    const cands = (s.image_versions2 && s.image_versions2.candidates) || [];
+    if (cands.length) {
+      const best = cands.slice().sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+      if (best && best.url) urls.push(best.url);
+    }
+  }
+  return urls;
+}
+
 function isFacebookUrl(u) {
   if (typeof u !== 'string') return false;
   try {
@@ -852,24 +892,16 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
 
     const { speedLimitKBps = 0, downloadSubs = false, cookiesFile = '', customArgs = '' } = opts;
     const effectiveQuality = opts.taskQuality || quality;
-    // A photo post (single image or a carousel of images). We let yt-dlp pick
-    // the real extension (.jpg/.webp) and download every carousel slide instead
-    // of forcing an mp4 video stream.
-    const isPhoto = opts.kind === 'photo';
 
     const safeName = sanitizeFilename(filenameBase || title || '%(title)s');
-    const ext = (effectiveQuality === 'audio' || isPhoto) ? '%(ext)s' : 'mp4';
-    // Carousels yield several files; suffix an index so they don't collide.
-    const nameTpl = isPhoto ? `${safeName}_%(autonumber)02d` : safeName;
-    const outputTemplate = path.join(outputDir, `${nameTpl}.${ext}`);
+    const ext = effectiveQuality === 'audio' ? '%(ext)s' : 'mp4';
+    const outputTemplate = path.join(outputDir, `${safeName}.${ext}`);
 
     const args = [
       ytdlpUrl,
-      '-f', isPhoto ? 'best' : buildYtdlpFormat(effectiveQuality),
+      '-f', buildYtdlpFormat(effectiveQuality),
       '-o', outputTemplate,
-      // Photos may be carousels — DON'T pass --no-playlist for them, so every
-      // slide is pulled; videos stay single-item.
-      ...(isPhoto ? [] : ['--no-playlist']),
+      '--no-playlist',
       '--newline',
       '--no-warnings',
       '--no-overwrites',
@@ -881,10 +913,7 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
       '--user-agent', YTDLP_UA,
       '--sleep-requests', '1',
     ];
-    if (isPhoto) {
-      // Image post: nothing video-specific. No mp4 merge, no duration filter
-      // (that would reject the images we actually want here).
-    } else if (effectiveQuality !== 'audio') {
+    if (effectiveQuality !== 'audio') {
       args.push('--merge-output-format', 'mp4');
       // For Instagram in particular yt-dlp will happily return image
       // carousel slots as the "best format" — explicitly require a video
@@ -1576,6 +1605,25 @@ async function runDownloadOnce(task, entry, ctx) {
       try { fs.unlinkSync(filePath); } catch {}
       filePath = mp3Path;
     }
+  } else if (plat === 'instagram' && task.kind === 'photo') {
+    // Image post (single or carousel). yt-dlp can't fetch IG photos, so we
+    // resolve the real image CDN URLs from the media-info API and pull them
+    // straight with downloadFile (which adds the right Instagram Referer).
+    const igCookies = path.join(process.env.MEDIAGRAB_DATA_DIR || path.join(__dirname, 'data'), 'instagram-cookies.txt');
+    const imgUrls = await instagramResolvePhotoUrls(task.url, igCookies);
+    if (!imgUrls.length) throw new Error('مفيش صور في البوست ده (أو محتاج تسجيل دخول).');
+    let saved = '';
+    for (let i = 0; i < imgUrls.length; i++) {
+      if (entry.cancelled) throw new Error('Cancelled');
+      const suffix = imgUrls.length > 1 ? `_${String(i + 1).padStart(2, '0')}` : '';
+      const destBase = uniquePath(path.join(taskOutputDir, `${filenameBase}${suffix}.jpg`));
+      saved = await downloadFile(imgUrls[i], destBase, task.id, task.title);
+      emitProgress(task.id, {
+        title: task.title, status: 'downloading',
+        progress: Math.round(((i + 1) / imgUrls.length) * 100), speed: '',
+      });
+    }
+    filePath = saved;
   } else {
     filePath = await ytdlpDownload(task.url, taskOutputDir, task.id, task.title, quality, filenameBase, {
       speedLimitKBps, downloadSubs, cookiesFile, customArgs,
