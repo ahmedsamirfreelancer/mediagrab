@@ -793,9 +793,12 @@ ipcMain.handle('tiktok-embed:clearDownloaded', async () => {
  * MOBILE user-agent so Instagram serves its phone layout — the only one whose
  * keyword search surfaces Reels (the desktop site hides them). */
 
-// An iPhone Safari UA. Instagram keys its "this is a phone → show Reels in
-// search" behaviour off the UA, so we present one for this window only.
-const IG_MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+// An Android Chrome (mobile) UA. Instagram keys its "this is a phone → show
+// Reels in search" behaviour off any phone UA, so this still surfaces Reels in
+// keyword search — but UNLIKE an iPhone Safari UA it makes Instagram serve the
+// reel video as Chromium-playable MSE/MP4 instead of native-HLS (.m3u8), which
+// our Chromium window can't play (the video would just sit there frozen).
+const IG_MOBILE_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
 ipcMain.handle('instagram:openSearchWindow', async (_evt, query, base) => {
   lastEmbedBase = base || lastEmbedBase || '';
@@ -826,6 +829,9 @@ ipcMain.handle('instagram:openSearchWindow', async (_evt, query, base) => {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload-instagram-embed.js'),
+      // Let Instagram's player start the reel without a manual gesture —
+      // Chromium's default autoplay block otherwise leaves it frozen.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
   // Spoof a phone for every request this window makes (page + XHR), so
