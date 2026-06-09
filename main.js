@@ -1473,9 +1473,14 @@ function fetchBinary(url, dest) {
   });
 }
 
+// NIGHTLY, not stable: Instagram (and other sites) break often and the fixes
+// land in nightly weeks before any stable release — the stable build is
+// regularly "marked as broken" and unable to extract Instagram at all.
+const YTDLP_RELEASE_API = 'https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest';
+
 ipcMain.handle('ytdlp:check', async () => {
   try {
-    const release = await fetchJson('https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest');
+    const release = await fetchJson(YTDLP_RELEASE_API);
     const latest = String(release.tag_name || '').replace(/^v/, '');
     const current = readCurrentYtdlpVersion();
     return {
@@ -1488,25 +1493,53 @@ ipcMain.handle('ytdlp:check', async () => {
   }
 });
 
+// Download the latest nightly yt-dlp into userData/bin (which getYtdlpActivePath
+// prefers over the bundled copy) and restart the server so it's picked up.
+// Shared by the manual "update" button and the silent on-launch refresh.
+async function updateYtdlpToLatest() {
+  const release = await fetchJson(YTDLP_RELEASE_API);
+  const asset = (release.assets || []).find((a) => a.name === 'yt-dlp.exe');
+  if (!asset) throw new Error('yt-dlp.exe asset not found in latest release');
+  const dest = getYtdlpUserPath();
+  await fetchBinary(asset.browser_download_url, dest);
+  const version = readCurrentYtdlpVersion();
+  if (serverProcess) {
+    try { serverProcess.kill(); } catch {}
+    serverProcess = null;
+    startServer();
+  }
+  return { version, path: dest };
+}
+
 ipcMain.handle('ytdlp:update', async () => {
   try {
-    const release = await fetchJson('https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest');
-    const asset = (release.assets || []).find((a) => a.name === 'yt-dlp.exe');
-    if (!asset) return { success: false, message: 'yt-dlp.exe asset not found in latest release' };
-    const dest = getYtdlpUserPath();
-    await fetchBinary(asset.browser_download_url, dest);
-    const version = readCurrentYtdlpVersion();
-    // Restart the server so it picks up the new binary on PATH.
-    if (serverProcess) {
-      try { serverProcess.kill(); } catch {}
-      serverProcess = null;
-      startServer();
-    }
+    const { version, path: dest } = await updateYtdlpToLatest();
     return { success: true, version, path: dest };
   } catch (e) {
     return { success: false, message: e.message };
   }
 });
+
+// Once per day, refresh yt-dlp to the latest nightly in the background so the
+// app keeps downloading after Instagram/etc. change their site — without the
+// user having to notice anything broke or click "update". Best-effort: any
+// failure (offline, GitHub down) is swallowed and the bundled copy stays.
+function maybeAutoUpdateYtdlp() {
+  try {
+    const stampFile = path.join(app.getPath('userData'), 'bin', '.ytdlp-checked');
+    let last = 0;
+    try { last = parseInt(fs.readFileSync(stampFile, 'utf8'), 10) || 0; } catch {}
+    if (Date.now() - last < 24 * 60 * 60 * 1000) return;
+    updateYtdlpToLatest()
+      .then(() => {
+        try {
+          fs.mkdirSync(path.dirname(stampFile), { recursive: true });
+          fs.writeFileSync(stampFile, String(Date.now()), 'utf8');
+        } catch {}
+      })
+      .catch(() => {});
+  } catch {}
+}
 
 /* ─── Error reporting to arqami.app ──────────────────────────────────────── */
 
@@ -1581,17 +1614,24 @@ app.whenReady().then(async () => {
     } catch {}
   }
 
+  let licensed = false;
   if (licenseClient.isValid()) {
     await bootLicensedApp();
+    licensed = true;
   } else {
     // Owner builds get a baked-in license key and skip the activation UI.
     const autoActivated = await licenseClient.tryAutoActivateWithOwnerKey();
     if (autoActivated) {
       await bootLicensedApp();
+      licensed = true;
     } else {
       createActivationWindow();
     }
   }
+
+  // Keep yt-dlp fresh in the background (once/day) so downloads keep working
+  // after sites change. Delayed so it never competes with first-paint.
+  if (licensed) setTimeout(maybeAutoUpdateYtdlp, 8000);
 });
 
 app.on('window-all-closed', () => {

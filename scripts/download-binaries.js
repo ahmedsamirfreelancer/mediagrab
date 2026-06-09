@@ -15,8 +15,12 @@ const { execSync } = require('child_process');
 const RESOURCES_DIR = path.join(__dirname, '..', 'resources');
 const FORCE = process.env.FORCE_DOWNLOAD === '1';
 
-// yt-dlp.exe is small (~10MB) and updates monthly. Get the latest release each install.
-const YTDLP_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+// yt-dlp.exe is small (~10MB). Use the NIGHTLY channel, not stable: Instagram
+// (a core platform here) breaks frequently and the fixes land in nightly weeks
+// before they reach a stable release — the stable build is regularly unable to
+// extract Instagram at all ("marked as broken"). The app also self-updates
+// yt-dlp to nightly on launch (see main.js), so what's bundled is just a floor.
+const YTDLP_URL = 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe';
 
 // ffmpeg/ffprobe are huge (~95MB each). Use the gyan.dev essentials build —
 // a well-maintained Windows static build that's small and battery-included.
