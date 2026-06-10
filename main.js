@@ -1258,6 +1258,12 @@ function setupAutoUpdater() {
     autoUpdater.on('update-downloaded', (info) => sendUpdateStatus('downloaded', { version: info && info.version }));
     autoUpdater.on('error', () => sendUpdateStatus('error'));
     autoUpdater.checkForUpdates().catch(() => {});
+    // Re-check every 3 hours so long-running instances — and ones whose boot
+    // check hit a momentary network/antivirus blip — still pick up new releases
+    // with zero user action. electron-updater no-ops if already latest/downloaded.
+    setInterval(() => {
+      try { autoUpdater.checkForUpdates().catch(() => {}); } catch {}
+    }, 3 * 60 * 60 * 1000);
   } catch {}
 }
 
