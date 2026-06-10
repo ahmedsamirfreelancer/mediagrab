@@ -130,12 +130,7 @@ async function bootLicensedApp() {
   // Re-validate against the license server in the background. If revoked,
   // the next launch will fall back to activation flow.
   licenseClient.startCron();
-  if (autoUpdater) {
-    try {
-      autoUpdater.autoDownload = true;
-      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-    } catch {}
-  }
+  if (autoUpdater) setupAutoUpdater();
 }
 
 /* ─── IPC handlers (used by license/activate.html) ───────────────────────── */
@@ -1025,6 +1020,61 @@ ipcMain.handle('fb-adlib:openExternal', async (_evt, url) => {
 
 // Real app version for the header badge (so it never goes stale per release).
 ipcMain.handle('app:getVersion', () => { try { return app.getVersion(); } catch { return ''; } });
+
+/* ─── App auto-update (electron-updater) ─────────────────────────────────── */
+// We keep the latest updater state in memory so the renderer can ask for it any
+// time (e.g. the window opened after the update already downloaded silently),
+// and we also push every state change so the in-app banner shows live without
+// the user having to dig into Settings.
+let appUpdateState = { status: 'idle', version: null, progress: 0 };
+
+function sendUpdateStatus(status, extra) {
+  appUpdateState = { ...appUpdateState, status, ...(extra || {}) };
+  try {
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send('app-update:status', appUpdateState);
+    }
+  } catch {}
+}
+
+function setupAutoUpdater() {
+  try {
+    autoUpdater.autoDownload = true;          // pull the new version in the background
+    autoUpdater.autoInstallOnAppQuit = true;  // and apply it when the user closes the app
+    autoUpdater.on('checking-for-update', () => sendUpdateStatus('checking'));
+    autoUpdater.on('update-available', (info) => sendUpdateStatus('available', { version: info && info.version }));
+    autoUpdater.on('update-not-available', () => sendUpdateStatus('uptodate'));
+    autoUpdater.on('download-progress', (p) => sendUpdateStatus('downloading', { progress: Math.round((p && p.percent) || 0) }));
+    autoUpdater.on('update-downloaded', (info) => sendUpdateStatus('downloaded', { version: info && info.version }));
+    autoUpdater.on('error', () => sendUpdateStatus('error'));
+    autoUpdater.checkForUpdates().catch(() => {});
+  } catch {}
+}
+
+// Manual "check for updates" button in Settings.
+ipcMain.handle('app:checkForUpdate', async () => {
+  if (!autoUpdater) return { supported: false, current: (() => { try { return app.getVersion(); } catch { return ''; } })() };
+  try {
+    sendUpdateStatus('checking');
+    const r = await autoUpdater.checkForUpdates();
+    const latest = r && r.updateInfo ? r.updateInfo.version : null;
+    return { supported: true, current: app.getVersion(), latest, status: appUpdateState.status };
+  } catch (e) {
+    return { supported: true, error: e.message, current: app.getVersion() };
+  }
+});
+
+// Renderer asks for whatever state we already know (on window open).
+ipcMain.handle('app:updateState', () => ({
+  ...appUpdateState,
+  current: (() => { try { return app.getVersion(); } catch { return ''; } })(),
+}));
+
+// "Restart & install" button / banner — applies the downloaded update right now.
+ipcMain.handle('app:installUpdate', () => {
+  if (!autoUpdater) return false;
+  try { setImmediate(() => autoUpdater.quitAndInstall()); return true; } catch { return false; }
+});
 
 ipcMain.on('facebook-embed:download', (_evt, payload) => {
   const hasWork = payload && (payload.url || (Array.isArray(payload.urls) && payload.urls.length));

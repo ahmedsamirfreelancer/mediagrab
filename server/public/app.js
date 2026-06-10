@@ -2298,6 +2298,72 @@
     }
   }
 
+  // ── App auto-update UI ──────────────────────────────────────────────────
+  // Reflects whatever state the main process reports into the Settings section
+  // and the big top banner. Called both on a live push and when opening Settings.
+  function applyAppUpdateState(s) {
+    if (!s) return;
+    const curEl = document.getElementById('appupdate-current');
+    const statusEl = document.getElementById('appupdate-status');
+    const installBtn = document.getElementById('appupdate-install-btn');
+    if (curEl && s.current) curEl.textContent = 'v' + s.current;
+    const labels = {
+      idle: '—',
+      checking: 'جاري الفحص...',
+      uptodate: 'أنت على آخر نسخة ✓',
+      available: 'في تحديث جديد — بينزّل...',
+      downloading: `بينزّل التحديث... ${s.progress || 0}%`,
+      downloaded: `تحديث جاهز (v${s.version || ''}) — أعد التشغيل عشان يتثبّت`,
+      error: 'تعذّر الفحص — جرّب تاني',
+    };
+    if (statusEl) statusEl.textContent = labels[s.status] || '—';
+    if (installBtn) installBtn.style.display = (s.status === 'downloaded') ? '' : 'none';
+    const banner = document.getElementById('appupdate-banner');
+    if (banner) banner.style.display = (s.status === 'downloaded') ? 'flex' : 'none';
+  }
+
+  async function refreshAppUpdateSection() {
+    if (!window.electronAPI?.app?.updateState) return;
+    const section = document.getElementById('appupdate-section');
+    if (section) section.style.display = '';
+    try { applyAppUpdateState(await window.electronAPI.app.updateState()); } catch (e) { /* ignore */ }
+  }
+
+  function bindAppUpdateButtons() {
+    if (!window.electronAPI?.app) return;
+    // Live status pushed from the main process (download progress, ready, etc.).
+    if (window.electronAPI.app.onUpdateStatus) {
+      window.electronAPI.app.onUpdateStatus((s) => applyAppUpdateState(s));
+    }
+    const checkBtn = document.getElementById('appupdate-check-btn');
+    if (checkBtn) {
+      checkBtn.addEventListener('click', async () => {
+        checkBtn.disabled = true; checkBtn.textContent = 'جاري الفحص...';
+        try {
+          const r = await window.electronAPI.app.checkForUpdate();
+          if (r && r.supported === false) toast('التحديث التلقائي مش متاح في النسخة دي', 'info');
+          else if (r && r.error) toast('تعذّر الفحص — اتأكد من النت', 'error');
+          else if (r && r.latest && r.latest !== r.current) toast(`في تحديث جديد v${r.latest} — بينزّل دلوقتي`, 'success');
+          else toast('أنت على آخر نسخة ✓', 'success');
+        } catch (e) { toast('تعذّر الفحص — اتأكد من النت', 'error'); }
+        checkBtn.disabled = false; checkBtn.textContent = 'فحص التحديثات';
+      });
+    }
+    const installBtn = document.getElementById('appupdate-install-btn');
+    if (installBtn) installBtn.addEventListener('click', () => window.electronAPI.app.installUpdate());
+    const bannerBtn = document.getElementById('appupdate-banner-btn');
+    if (bannerBtn) bannerBtn.addEventListener('click', () => window.electronAPI.app.installUpdate());
+    const bannerLater = document.getElementById('appupdate-banner-later');
+    if (bannerLater) bannerLater.addEventListener('click', () => {
+      const b = document.getElementById('appupdate-banner'); if (b) b.style.display = 'none';
+    });
+    // On open: if an update already downloaded silently before the window loaded,
+    // show the banner right away so the user notices "في تحديث" أول ما يفتح.
+    if (window.electronAPI.app.updateState) {
+      window.electronAPI.app.updateState().then(applyAppUpdateState).catch(() => {});
+    }
+  }
+
   async function refreshFacebookLoginStatus() {
     if (!window.electronAPI?.facebook) return;
     const statusEl = document.getElementById('fb-login-status');
@@ -3161,6 +3227,7 @@
       applySettingsToForm();
       refreshLicenseSection();
       refreshYtdlpSection();
+      refreshAppUpdateSection();
       dom.settingsModal.classList.remove('hidden');
     });
     dom.settingsClose.addEventListener('click', () => dom.settingsModal.classList.add('hidden'));
@@ -3403,6 +3470,7 @@
     bindBatchModal();
     bindCookieImportButtons();
     bindLicenseAndYtdlpButtons();
+    bindAppUpdateButtons();
     switchPlatform('tiktok');
 
     // No auto-restore on refresh — the user picks what to open from History.

@@ -55,6 +55,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App version for the header badge (always matches the real build).
   app: {
     version: () => ipcRenderer.invoke('app:getVersion'),
+    checkForUpdate: () => ipcRenderer.invoke('app:checkForUpdate'),
+    updateState: () => ipcRenderer.invoke('app:updateState'),
+    installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
+    onUpdateStatus: (cb) => ipcRenderer.on('app-update:status', (_e, data) => cb(data)),
   },
   // License info (read-only; activation happens at the gate before this window opens)
   license: {

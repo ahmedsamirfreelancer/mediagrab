@@ -10,6 +10,13 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- App update banner (Electron) — appears at the top when a new version is ready -->
+  <div id="appupdate-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:99999; background:linear-gradient(90deg,#7c3aed,#a855f7); color:#fff; padding:12px 18px; align-items:center; justify-content:center; gap:14px; box-shadow:0 2px 14px rgba(0,0,0,0.35); font-size:14px;">
+    <span id="appupdate-banner-text">🎉 في تحديث جديد جاهز للبرنامج</span>
+    <button id="appupdate-banner-btn" style="background:#fff; color:#7c3aed; font-weight:700; padding:7px 18px; border-radius:6px; border:none; cursor:pointer;">أعد التشغيل وثبّت دلوقتي</button>
+    <button id="appupdate-banner-later" style="background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.6); padding:7px 14px; border-radius:6px; cursor:pointer;">بعدين</button>
+  </div>
+
   <!-- Toast Container -->
   <div id="toast-container"></div>
 
@@ -164,6 +171,24 @@
           <div style="display:flex; gap:8px; margin-top:10px;">
             <button class="btn btn-secondary" id="ytdlp-check-btn">فحص</button>
             <button class="btn btn-primary" id="ytdlp-update-btn" style="display:none;">تحديث yt-dlp</button>
+          </div>
+        </div>
+
+        <div class="setting-group" id="appupdate-section" style="display:none;">
+          <label style="font-weight:700; font-size:14px; margin-bottom:10px;">تحديث البرنامج</label>
+          <div style="background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.25); border-radius:8px; padding:14px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+              <span>النسخة الحالية:</span>
+              <code id="appupdate-current" style="font-family:monospace;">—</code>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+              <span>الحالة:</span>
+              <strong id="appupdate-status" style="font-size:13px;">—</strong>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:10px;">
+            <button class="btn btn-secondary" id="appupdate-check-btn">فحص التحديثات</button>
+            <button class="btn btn-primary" id="appupdate-install-btn" style="display:none;">أعد التشغيل وثبّت التحديث</button>
           </div>
         </div>
       </div>
