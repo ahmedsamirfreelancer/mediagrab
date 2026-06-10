@@ -44,6 +44,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onEmbedDownload: (cb) => ipcRenderer.on('tiktok-embed:download', (_e, data) => cb(data)),
   },
   // Manual cookies.txt import — workaround for Chrome 127+ DPAPI lock
+  pinterest: {
+    status: () => ipcRenderer.invoke('pinterest:status'),
+    login: () => ipcRenderer.invoke('pinterest:login'),
+    logout: () => ipcRenderer.invoke('pinterest:logout'),
+    openSearchWindow: (query, base) => ipcRenderer.invoke('pinterest:openSearchWindow', query, base),
+    onEmbedDownload: (cb) => ipcRenderer.on('pinterest-embed:download', (_e, data) => cb(data)),
+  },
   cookies: {
     import: (platform) => ipcRenderer.invoke('cookies:import', platform),
   },

@@ -129,6 +129,7 @@
     youtube: /youtube\.com|youtu\.be/i,
     instagram: /instagram\.com|instagr\.am/i,
     facebook: /facebook\.com|fb\.watch|fb\.com/i,
+    pinterest: /pinterest\.com|pin\.it/i,
   };
 
   const platformNames = {
@@ -136,6 +137,7 @@
     youtube: 'YouTube',
     instagram: 'Instagram',
     facebook: 'Facebook',
+    pinterest: 'Pinterest',
   };
 
   function isValidUrl(s) {
@@ -559,6 +561,15 @@
         const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
         window.electronAPI.tiktok.openSearchWindow(payload.query, base);
         toast('فتحنا تيك توك — دوس «تحميل» على أي فيديو', 'info', 5000);
+        return;
+      }
+
+      // Pinterest: open the REAL pinterest.com pins search in a window with a
+      // download button on every pin (images + videos).
+      if (state.platform === 'pinterest' && window.electronAPI?.pinterest?.openSearchWindow) {
+        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        window.electronAPI.pinterest.openSearchWindow(payload.query, base);
+        toast('فتحنا Pinterest — دوس «تحميل» على أي صورة/فيديو', 'info', 5000);
         return;
       }
 
@@ -2097,7 +2108,7 @@
     $$('.platform-tab').forEach((tab) => {
       tab.classList.toggle('active', tab.dataset.platform === platform);
     });
-    const searchable = ['tiktok', 'youtube', 'instagram', 'facebook'];
+    const searchable = ['tiktok', 'youtube', 'instagram', 'facebook', 'pinterest'];
     dom.searchSection.style.display = searchable.includes(platform) ? '' : 'none';
 
     // Ad Library tab: swap the whole download/search UI for the spy-tool launch
@@ -2120,6 +2131,7 @@
         youtube: 'ابحث على YouTube…',
         instagram: 'ابحث: كلمة (مثل: عطور) أو @اسم-حساب — Reels مباشرة',
         facebook: 'ابحث: hashtag (مثلاً: عطور) أو @صفحة',
+        pinterest: 'ابحث على Pinterest… (مثل: ديكور، عطور)',
       };
       dom.searchInput.placeholder = placeholders[platform] || 'Search for videos...';
     }
@@ -2674,6 +2686,22 @@
         const items = urls.map((u) => {
           const id = (u.match(/[?&]v=(\d+)/) || u.match(/\/(?:reel|videos)\/(\d+)/) || [])[1];
           return { id: undefined, url: u, title: id ? ('facebook_' + id) : u, platform: 'facebook' };
+        });
+        startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
+      });
+    }
+    // Same, for the embedded Pinterest window. Each pin may be an image or a
+    // video — the server resolves which and downloads accordingly.
+    if (window.electronAPI?.pinterest?.onEmbedDownload) {
+      window.electronAPI.pinterest.onEmbedDownload((data) => {
+        if (!data) return;
+        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const sub = (data.folder || '').trim();
+        const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
+        if (!urls.length) return;
+        const items = urls.map((u) => {
+          const id = (u.match(/\/pin\/(\d+)/) || [])[1];
+          return { id: undefined, url: u, title: id ? ('pinterest_' + id) : u, platform: 'pinterest' };
         });
         startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
       });

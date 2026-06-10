@@ -40,6 +40,7 @@
   --instagram-5: #bc1888;
   --twitter: #1da1f2;
   --facebook: #1877f2;
+  --pinterest: #e60023;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -273,6 +274,11 @@ body {
 }
 .platform-tab[data-platform="facebook"].active {
   background: var(--facebook);
+  color: white;
+}
+
+.platform-tab[data-platform="pinterest"].active {
+  background: var(--pinterest);
   color: white;
 }
 
@@ -1126,6 +1132,7 @@ body {
 .card-platform-badge.instagram { background: linear-gradient(45deg, rgba(240,148,51,0.85), rgba(188,24,136,0.85)); }
 .card-platform-badge.twitter { background: rgba(0, 0, 0, 0.85); border: 1px solid rgba(255,255,255,0.2); }
 .card-platform-badge.facebook { background: rgba(24, 119, 242, 0.85); }
+.card-platform-badge.pinterest { background: rgba(230, 0, 35, 0.85); }
 
 .card-platform-badge svg {
   width: 14px;
@@ -1597,6 +1604,7 @@ body {
 .history-platform.instagram { background: rgba(220,39,67,.2);  color: #ff6b8a; }
 .history-platform.twitter   { background: rgba(29,161,242,.2); color: #6cc1f4; }
 .history-platform.facebook  { background: rgba(24,119,242,.2); color: #5a9bf5; }
+.history-platform.pinterest { background: rgba(230,0,35,.2);  color: #ff4861; }
 
 .history-url {
   font-size: 0.7rem;

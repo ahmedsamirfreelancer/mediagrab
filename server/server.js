@@ -340,6 +340,80 @@ function isFacebookUrl(u) {
   } catch { return false; }
 }
 
+function isPinterestUrl(u) {
+  if (typeof u !== 'string') return false;
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    return h === 'pinterest.com' || h.endsWith('.pinterest.com') || h === 'pin.it';
+  } catch { return false; }
+}
+
+// Pinterest IMAGE pins: yt-dlp's Pinterest extractor only handles VIDEO pins
+// and errors on images ("No video formats found"). For images we fetch the pin
+// page and pull the full-resolution image straight off i.pinimg.com — the same
+// idea as the Instagram photo path. Returns [] for videos / on failure so the
+// caller falls back to its original error. Follows one redirect (pin.it links).
+function pinterestResolveImageUrls(pinUrl, _depth = 0) {
+  return new Promise((resolve) => {
+    let target;
+    try { target = new URL(pinUrl); } catch { return resolve([]); }
+    const req = https.request({
+      hostname: target.hostname,
+      path: target.pathname + target.search,
+      method: 'GET',
+      timeout: API_TIMEOUT_MS,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    }, (res) => {
+      // Follow a single redirect (pin.it short links, locale redirects).
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && _depth < 3) {
+        res.resume();
+        const next = res.headers.location.startsWith('http')
+          ? res.headers.location
+          : `https://${target.hostname}${res.headers.location}`;
+        return resolve(pinterestResolveImageUrls(next, _depth + 1));
+      }
+      const chunks = [];
+      const enc = (res.headers['content-encoding'] || '').toLowerCase();
+      let stream = res;
+      if (enc === 'gzip') stream = res.pipe(require('zlib').createGunzip());
+      else if (enc === 'br') stream = res.pipe(require('zlib').createBrotliDecompress());
+      else if (enc === 'deflate') stream = res.pipe(require('zlib').createInflate());
+      stream.on('data', (c) => chunks.push(c));
+      stream.on('end', () => {
+        const html = Buffer.concat(chunks).toString('utf8');
+        const urls = [];
+        // 1) JSON-LD / embedded "contentUrl" (the exact pin media — most precise).
+        let m = html.match(/"contentUrl":"(https:\\?\/\\?\/i\.pinimg\.com\\?\/[^"]+)"/);
+        if (m) urls.push(m[1].replace(/\\\//g, '/'));
+        // 2) og:image meta tag.
+        if (!urls.length) {
+          m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+            || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+          if (m) urls.push(m[1]);
+        }
+        // 3) Any /originals/ image as a last resort.
+        if (!urls.length) {
+          m = html.match(/https:\/\/i\.pinimg\.com\/originals\/[A-Za-z0-9/_.-]+\.(?:jpe?g|png|gif|webp)/i);
+          if (m) urls.push(m[0]);
+        }
+        // Upgrade sized thumbnails (e.g. /736x/) to /originals/ for full res.
+        const upgraded = urls
+          .map((u) => u.replace(/\/(?:\d+x\d*|\d+x)\//, '/originals/'))
+          .filter((u) => /^https:\/\/i\.pinimg\.com\//i.test(u));
+        resolve([...new Set(upgraded)]);
+      });
+    });
+    req.on('error', () => resolve([]));
+    req.setTimeout(API_TIMEOUT_MS, () => { req.destroy(); resolve([]); });
+    req.end();
+  });
+}
+
 function buildInstagramUrl(input, mode) {
   const raw = String(input || '').trim();
   if (!raw) return null;
@@ -777,6 +851,8 @@ function downloadFile(fileUrl, destBase, downloadId, title) {
       else if (ct.includes('audio/mp4') || ct.includes('audio/m4a')) ext = '.m4a';
       else if (ct.includes('image/jpeg')) ext = '.jpg';
       else if (ct.includes('image/png')) ext = '.png';
+      else if (ct.includes('image/webp')) ext = '.webp';
+      else if (ct.includes('image/gif')) ext = '.gif';
 
       const destWithExt = destBase.endsWith(ext) ? destBase : destBase.replace(/\.[a-z0-9]{2,4}$/i, '') + ext;
       const dest = uniquePath(destWithExt);
@@ -943,6 +1019,7 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
     if (entry) entry.proc = proc;
 
     let lastFile = '';
+    let stderrTail = ''; // keep the last bit of stderr to classify failures
 
     proc.stdout.on('data', (data) => {
       const text = data.toString();
@@ -964,6 +1041,7 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
 
     proc.stderr.on('data', (data) => {
       const text = data.toString();
+      stderrTail = (stderrTail + text).slice(-2000);
       for (const line of text.split('\n')) {
         const info = parseYtdlpProgress(line.trim());
         if (info) {
@@ -996,6 +1074,12 @@ function ytdlpDownload(ytdlpUrl, outputDir, downloadId, title, quality, filename
       // failing duration>0). Surface it as a friendly "not a video" message
       // so the UI can show it as skipped, not a hard error.
       if (code === 101) return reject(new Error('NOT_A_VIDEO'));
+      // Pinterest (and the odd other site) returns image-only items as having
+      // "No video formats". The Pinterest path keys its image fallback off this
+      // exact reason so a transient video failure doesn't grab a cover image.
+      if (/No video formats found|There is no video|Requested format is not available/i.test(stderrTail)) {
+        return reject(new Error('NO_VIDEO_FORMATS'));
+      }
       reject(new Error(`yt-dlp exited with code ${code}`));
     });
 
@@ -1624,6 +1708,38 @@ async function runDownloadOnce(task, entry, ctx) {
       });
     }
     filePath = saved;
+  } else if (plat === 'pinterest') {
+    // Video pins: yt-dlp handles them (incl. HLS → mp4). Image pins: yt-dlp
+    // refuses ("No video formats found"), so we resolve the image off the pin
+    // page and pull it straight with downloadFile — like Instagram photos.
+    try {
+      filePath = await ytdlpDownload(task.url, taskOutputDir, task.id, task.title, quality, filenameBase, {
+        speedLimitKBps, downloadSubs, cookiesFile, customArgs, taskQuality: task.quality,
+      });
+    } catch (e) {
+      if (entry.cancelled) throw e;
+      // Only treat it as an image pin when yt-dlp explicitly found no video.
+      // Any other failure (network, gated video) bubbles up to the normal retry
+      // so we never silently save a video's cover image instead of the video.
+      if (!/NO_VIDEO_FORMATS/.test(e.message)) throw e;
+      const imgUrls = await pinterestResolveImageUrls(task.url);
+      if (!imgUrls.length) throw e; // not a resolvable image either → original error
+      let saved = '';
+      for (let i = 0; i < imgUrls.length; i++) {
+        if (entry.cancelled) throw new Error('Cancelled');
+        const u = imgUrls[i];
+        const extn = ((u.match(/\.(jpe?g|png|gif|webp)(?:\?|$)/i) || [, 'jpg'])[1] || 'jpg')
+          .toLowerCase().replace('jpeg', 'jpg');
+        const suffix = imgUrls.length > 1 ? `_${String(i + 1).padStart(2, '0')}` : '';
+        const destBase = uniquePath(path.join(taskOutputDir, `${filenameBase}${suffix}.${extn}`));
+        saved = await downloadFile(u, destBase, task.id, task.title);
+        emitProgress(task.id, {
+          title: task.title, status: 'downloading',
+          progress: Math.round(((i + 1) / imgUrls.length) * 100), speed: '',
+        });
+      }
+      filePath = saved;
+    }
   } else {
     filePath = await ytdlpDownload(task.url, taskOutputDir, task.id, task.title, quality, filenameBase, {
       speedLimitKBps, downloadSubs, cookiesFile, customArgs,

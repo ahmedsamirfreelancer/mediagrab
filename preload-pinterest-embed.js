@@ -1,0 +1,380 @@
+/**
+ * Preload injected into the embedded Pinterest window. It runs in Pinterest's
+ * page (DOM access) but in an isolated world with ipcRenderer, so it can:
+ *   1. Show a small MediaGrab toolbar with the destination folder name.
+ *   2. Drop a "⬇ تحميل" button on every pin (image OR video).
+ *   3. Send the clicked pin's URL back to the main process, which forwards it
+ *      to the MediaGrab window's normal download queue.
+ *
+ * This gives the user Pinterest's EXACT search results (real page, infinite
+ * scroll) with one-click downloading — no scraping, no missing pins. The
+ * server figures out per pin whether it's a video (yt-dlp) or an image
+ * (resolved off the pin page), so both kinds download correctly.
+ */
+const { ipcRenderer } = require('electron');
+
+(function () {
+  const BTN_CLASS = 'mg-dl-btn';
+  const BTN_LABEL = '⬇ تحميل';
+
+  // Default folder = the search query (so a search's pins group together).
+  let defaultFolder = '';
+  try { defaultFolder = new URLSearchParams(location.search).get('q') || ''; } catch {}
+
+  // IDs already downloaded (server-side) → badge them. Re-clicking still works.
+  let downloadedSet = new Set();
+
+  // Paint a button according to whether its pin was already downloaded.
+  function applyState(btn) {
+    if (btn.dataset.done === '1') {
+      btn.textContent = '✓ اتحمّل';
+      btn.style.background = '#16a34a';
+      btn.title = 'اتحمّل قبل كده — دوس لو عايز تحمّله تاني';
+    } else {
+      btn.textContent = BTN_LABEL;
+      btn.style.background = '#e60023';
+      btn.title = '';
+    }
+  }
+
+  function currentFolder() {
+    return (document.getElementById('mg-folder') && document.getElementById('mg-folder').value || defaultFolder || '').trim();
+  }
+
+  // Queue every visible pin as ONE batch (so Stop can cancel them together).
+  function downloadAllVisible() {
+    const folder = currentFolder();
+    const urls = [];
+    for (const btn of document.querySelectorAll('.' + BTN_CLASS + '[data-vid]')) {
+      const url = btn.getAttribute('data-url');
+      if (!url) continue;
+      urls.push(url);
+      btn.dataset.done = '1';
+      applyState(btn);
+    }
+    if (urls.length) ipcRenderer.send('pinterest-embed:download', { urls, folder });
+    return urls.length;
+  }
+
+  // Update the "download selected (N)" button label with the checked count.
+  function updateSelCount() {
+    const n = document.querySelectorAll('.mg-sel:checked').length;
+    const el = document.getElementById('mg-sel-btn');
+    if (el) el.textContent = '⬇ حمّل المحدد (' + n + ')';
+  }
+
+  // Download only the pins whose checkbox is ticked.
+  function downloadSelected() {
+    const checked = Array.prototype.slice.call(document.querySelectorAll('.mg-sel:checked'));
+    if (!checked.length) { alert('محدّدتش أي بِن. علّم على البنّات الأول (✓ في الركن).'); return 0; }
+    if (!confirm('هتحمّل ' + checked.length + ' بِن محدد. متأكد؟')) return 0;
+    const folder = currentFolder();
+    const urls = [];
+    for (const cb of checked) {
+      const url = cb.getAttribute('data-url');
+      if (!url) continue;
+      urls.push(url);
+      const btn = document.querySelector('.' + BTN_CLASS + '[data-vid="' + cb.getAttribute('data-vid') + '"]');
+      if (btn) { btn.dataset.done = '1'; applyState(btn); }
+      cb.checked = false;
+    }
+    if (urls.length) ipcRenderer.send('pinterest-embed:download', { urls, folder });
+    updateSelCount();
+    return urls.length;
+  }
+
+  // Clear all green "downloaded" marks and reset every button to "تحميل".
+  async function resetMarks() {
+    try { await ipcRenderer.invoke('pinterest-embed:clearDownloaded'); } catch {}
+    downloadedSet = new Set();
+    for (const btn of document.querySelectorAll('.' + BTN_CLASS + '[data-vid]')) {
+      btn.dataset.done = '';
+      applyState(btn);
+    }
+  }
+
+  async function refreshDownloadedMarks() {
+    try {
+      const ids = await ipcRenderer.invoke('pinterest-embed:downloadedIds');
+      if (Array.isArray(ids)) downloadedSet = new Set(ids.map(String));
+    } catch {}
+    for (const btn of document.querySelectorAll('.' + BTN_CLASS + '[data-vid]')) {
+      if (downloadedSet.has(btn.getAttribute('data-vid')) && btn.dataset.done !== '1') {
+        btn.dataset.done = '1';
+        applyState(btn);
+      }
+    }
+  }
+
+  let baseDir = '';
+  function renderBasePath() {
+    const span = document.getElementById('mg-path-base');
+    if (span) span.textContent = (baseDir || '') + '\\';
+  }
+  function btnStyle(bg) {
+    return 'background:' + bg + ';color:#fff;border:none;border-radius:8px;padding:7px 13px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;';
+  }
+
+  // True when el's nearest scrollable ancestor is the window/document rather
+  // than an inner overflow:scroll container. A sticky element sticks relative
+  // to its scroll container, so this tells us whose top:0 our toolbar must
+  // compensate for — and whose we must leave alone.
+  function scrollAncestorIsWindow(el) {
+    let n = el.parentElement;
+    while (n && n !== document.body && n !== document.documentElement) {
+      const cs = getComputedStyle(n);
+      if (/(auto|scroll)/.test(cs.overflowY) || /(auto|scroll)/.test(cs.overflow)) return false;
+      n = n.parentElement;
+    }
+    return true;
+  }
+
+  // Make room for our fixed toolbar (idempotent, runs every tick).
+  function pushPageDown() {
+    try {
+      const bar = document.getElementById('mg-toolbar');
+      if (!bar || !document.body) return;
+      const h = bar.offsetHeight + 6;
+      document.body.style.paddingTop = h + 'px';
+      for (const el of document.querySelectorAll('body *')) {
+        if (el.id === 'mg-toolbar' || el.closest('#mg-toolbar')) continue;
+        const cs = getComputedStyle(el);
+        if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+        if (cs.position === 'sticky' && !scrollAncestorIsWindow(el)) continue;
+        const top = parseFloat(cs.top);
+        if (!isFinite(top) || top > 80) continue; // only near-top anchored bars
+        const want = h + 'px';
+        if (el.style.top !== want) el.style.top = want;
+      }
+    } catch {}
+  }
+
+  function injectToolbar() {
+    if (document.getElementById('mg-toolbar')) return;
+    if (!document.body) return;
+
+    const bar = document.createElement('div');
+    bar.id = 'mg-toolbar';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#15131f;color:#fff;display:flex;flex-direction:column;gap:9px;padding:11px 16px;font-family:sans-serif;font-size:13px;box-shadow:0 2px 16px rgba(0,0,0,.7);direction:rtl;border-bottom:1px solid #2a2740;';
+
+    // ── Row 1: destination path + open ──
+    const row1 = document.createElement('div');
+    row1.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;';
+    row1.innerHTML = '<strong style="color:#e60023;font-size:15px;">MediaGrab</strong><span style="opacity:.85;">📁 ينزّل في:</span>';
+
+    const pathWrap = document.createElement('div');
+    pathWrap.style.cssText = 'flex:1;min-width:280px;display:flex;align-items:center;background:#1c1a2b;border:1px solid #3a3754;border-radius:8px;padding:2px 6px;direction:ltr;';
+    const pathSpan = document.createElement('span');
+    pathSpan.id = 'mg-path-base';
+    pathSpan.style.cssText = 'color:#8b93b8;font-size:12px;padding:4px 4px;white-space:nowrap;max-width:55%;overflow:hidden;text-overflow:ellipsis;';
+    const input = document.createElement('input');
+    input.id = 'mg-folder';
+    input.value = defaultFolder;
+    input.placeholder = 'اسم المجلد';
+    input.style.cssText = 'flex:1;min-width:120px;padding:5px 8px;border:none;background:transparent;color:#fff;direction:ltr;font-size:13px;font-weight:600;outline:none;';
+    pathWrap.appendChild(pathSpan);
+    pathWrap.appendChild(input);
+    row1.appendChild(pathWrap);
+
+    const openBtn = document.createElement('button');
+    openBtn.textContent = '📂 فتح';
+    openBtn.title = 'يفتح مجلد التحميل';
+    openBtn.style.cssText = btnStyle('#2563eb');
+    openBtn.addEventListener('click', () => { ipcRenderer.invoke('pinterest-embed:openFolder', currentFolder()); });
+    row1.appendChild(openBtn);
+    bar.appendChild(row1);
+
+    // ── Row 2: actions ──
+    const row2 = document.createElement('div');
+    row2.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+
+    const dlAll = document.createElement('button');
+    dlAll.textContent = '⬇ حمّل كل الظاهر';
+    dlAll.title = 'ينزّل كل البنّات (صور/فيديو) الظاهرة دلوقتي';
+    dlAll.style.cssText = btnStyle('#e60023');
+    dlAll.addEventListener('click', () => {
+      const count = document.querySelectorAll('.' + BTN_CLASS + '[data-vid]').length;
+      if (!count) return;
+      if (!confirm('هتحمّل كل الـ ' + count + ' بِن الظاهرين. متأكد؟')) return;
+      const n = downloadAllVisible();
+      dlAll.textContent = '✓ ضفنا ' + n;
+      setTimeout(() => { dlAll.textContent = '⬇ حمّل كل الظاهر'; }, 2500);
+    });
+    row2.appendChild(dlAll);
+
+    // «تحديد» toggle — multi-select mode is off by default (clean grid).
+    const selToggle = document.createElement('button');
+    selToggle.id = 'mg-sel-toggle';
+    selToggle.textContent = '☑ تحديد';
+    selToggle.title = 'يفعّل وضع التحديد عشان تعلّم على كذا بِن وتحمّلهم مرة واحدة';
+    selToggle.style.cssText = btnStyle('#0ea5e9');
+    row2.appendChild(selToggle);
+
+    const selBtn = document.createElement('button');
+    selBtn.id = 'mg-sel-btn';
+    selBtn.textContent = '⬇ حمّل المحدد (0)';
+    selBtn.title = 'يحمّل البنّات اللي علّمت عليها (✓ في الركن)';
+    selBtn.style.cssText = btnStyle('#9333ea') + 'display:none;';
+    selBtn.addEventListener('click', () => {
+      const n = downloadSelected();
+      if (n > 0) { selBtn.textContent = '✓ ضفنا ' + n; setTimeout(updateSelCount, 2500); }
+    });
+    row2.appendChild(selBtn);
+
+    selToggle.addEventListener('click', () => {
+      const on = document.documentElement.classList.toggle('mg-selecting');
+      selToggle.textContent = on ? '✓ خلّصت تحديد' : '☑ تحديد';
+      selToggle.style.background = on ? '#0369a1' : '#0ea5e9';
+      selBtn.style.display = on ? '' : 'none';
+      if (!on) {
+        for (const cb of document.querySelectorAll('.mg-sel:checked')) cb.checked = false;
+        updateSelCount();
+      }
+    });
+
+    const reset = document.createElement('button');
+    reset.textContent = '↺ صفّر العلامات';
+    reset.title = 'يشيل كل العلامات الخضرا ويرجّع الأزرار «تحميل»';
+    reset.style.cssText = btnStyle('#374151');
+    reset.addEventListener('click', () => resetMarks());
+    row2.appendChild(reset);
+
+    const stopBtn = document.createElement('button');
+    stopBtn.textContent = '⏹ إيقاف';
+    stopBtn.title = 'يوقف كل التحميلات الجارية';
+    stopBtn.style.cssText = btnStyle('#b91c1c');
+    stopBtn.addEventListener('click', async () => {
+      try {
+        const r = await ipcRenderer.invoke('pinterest-embed:stopAll');
+        stopBtn.textContent = '⏹ وقفنا ' + ((r && r.cancelled) || 0);
+        setTimeout(() => { stopBtn.textContent = '⏹ إيقاف'; }, 2500);
+      } catch {}
+    });
+    row2.appendChild(stopBtn);
+
+    // Shown only while a single pin is open — downloads that exact pin.
+    const curBtn = document.createElement('button');
+    curBtn.id = 'mg-current-btn';
+    curBtn.textContent = '⬇ حمّل البِن المفتوح';
+    curBtn.title = 'يحمّل البِن اللي إنت فاتحه دلوقتي';
+    curBtn.style.cssText = btnStyle('#16a34a') + 'display:none;';
+    curBtn.addEventListener('click', () => {
+      const m = location.pathname.match(/\/pin\/(\d+)/);
+      if (!m) return;
+      const url = 'https://www.pinterest.com/pin/' + m[1] + '/';
+      ipcRenderer.send('pinterest-embed:download', { url, folder: currentFolder() });
+      curBtn.textContent = '✓ في الطابور';
+      setTimeout(() => { curBtn.textContent = '⬇ حمّل البِن المفتوح'; }, 2500);
+    });
+    row2.appendChild(curBtn);
+
+    const spacer = document.createElement('span');
+    spacer.style.flex = '1';
+    row2.appendChild(spacer);
+
+    const back = document.createElement('button');
+    back.textContent = '✕ رجوع للنتايج';
+    back.title = 'يرجّعك لقائمة نتايج البحث';
+    back.style.cssText = btnStyle('#dc2626');
+    back.addEventListener('click', () => { try { history.back(); } catch {} });
+    row2.appendChild(back);
+    bar.appendChild(row2);
+
+    (document.body || document.documentElement).appendChild(bar);
+
+    pushPageDown();
+    setTimeout(pushPageDown, 400);
+
+    ipcRenderer.invoke('pinterest-embed:baseDir').then((b) => { baseDir = b || ''; renderBasePath(); }).catch(() => {});
+  }
+
+  function addButtons() {
+    // Only the search-results page gets grid buttons. When a pin is opened
+    // Pinterest navigates to /pin/<id>/ whose related links would otherwise get
+    // buttons sprayed across them — so bail unless we're on /search.
+    if (!/^\/search/.test(location.pathname)) return;
+    for (const a of document.querySelectorAll('a[href*="/pin/"]')) {
+      const m = (a.getAttribute('href') || '').match(/\/pin\/(\d+)/);
+      if (!m) continue;
+      const id = m[1];
+      // Skip the opened-pin dialog (related/comment links live there).
+      if (a.closest('[role="dialog"]')) continue;
+      // Grid cards only — real pin cards wrap an <img>; text links don't.
+      if (!a.querySelector('img')) continue;
+      // Exactly ONE button per pin — Pinterest renders several links per card.
+      if (document.querySelector('.' + BTN_CLASS + '[data-vid="' + id + '"]')) continue;
+      const url = 'https://www.pinterest.com/pin/' + id + '/';
+      if (getComputedStyle(a).position === 'static') a.style.position = 'relative';
+      const btn = document.createElement('button');
+      btn.className = BTN_CLASS;
+      btn.setAttribute('data-vid', id);
+      btn.setAttribute('data-url', url);
+      // z-index 50 (not max) so Pinterest's open-pin overlay paints OVER these.
+      btn.style.cssText = 'position:absolute;top:8px;left:8px;z-index:50;background:#e60023;color:#fff;border:none;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5);';
+      if (downloadedSet.has(id)) btn.dataset.done = '1';
+      applyState(btn);
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const folder = currentFolder();
+        ipcRenderer.send('pinterest-embed:download', { url, folder });
+        btn.dataset.done = '1'; // optimistic — re-clicking still re-downloads
+        btn.textContent = '✓ في الطابور';
+        btn.style.background = '#16a34a';
+        setTimeout(() => applyState(btn), 2500);
+      }, true);
+      a.appendChild(btn);
+
+      // Selection checkbox (top-right) for the "download selected" workflow.
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'mg-sel';
+      cb.setAttribute('data-vid', id);
+      cb.setAttribute('data-url', url);
+      cb.style.cssText = 'position:absolute;top:8px;right:8px;z-index:50;width:22px;height:22px;cursor:pointer;accent-color:#9333ea;';
+      cb.addEventListener('click', (e) => e.stopPropagation(), true);
+      cb.addEventListener('change', updateSelCount);
+      a.appendChild(cb);
+    }
+  }
+
+  function injectStyle() {
+    if (document.getElementById('mg-style')) return;
+    const s = document.createElement('style');
+    s.id = 'mg-style';
+    // Selection checkboxes are HIDDEN until the user turns on «تحديد» mode;
+    // the per-pin «تحميل» button stays for one-click single downloads.
+    s.textContent =
+      '.mg-sel{display:none!important;}' +
+      'html.mg-selecting .mg-sel{display:inline-block!important;}' +
+      '.mg-hide-btns .mg-dl-btn{display:none!important;}' +
+      '.mg-hide-btns .mg-sel{display:none!important;}';
+    (document.head || document.documentElement).appendChild(s);
+  }
+
+  function tick() {
+    try {
+      injectStyle();
+      injectToolbar();
+      pushPageDown();
+      // When a pin is open the path leaves /search → hide grid buttons so they
+      // never bleed over Pinterest's open-pin view.
+      const onPin = /^\/pin\/\d+/.test(location.pathname);
+      document.documentElement.classList.toggle('mg-hide-btns', !/^\/search/.test(location.pathname));
+      const curBtn = document.getElementById('mg-current-btn');
+      if (curBtn) curBtn.style.display = onPin ? '' : 'none';
+      addButtons();
+    } catch {}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tick);
+  } else {
+    tick();
+  }
+  // Pinterest loads pins lazily on scroll, so keep sweeping for new cards.
+  setInterval(tick, 1500);
+  // Refresh the "already downloaded" badges periodically (and once up front).
+  refreshDownloadedMarks();
+  setInterval(refreshDownloadedMarks, 3000);
+})();
