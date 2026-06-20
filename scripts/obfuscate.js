@@ -56,11 +56,13 @@ const OPTIONS = {
   reservedNames: ['^require$', '^module$', '^exports$', '^process$', '^global$'],
 };
 
-// Build-time secret. Set MEDIAGRAB_BUILD_SECRET in your shell before
-// `npm run build` (or in a .env.production file). MUST match arqami.app's
-// LICENSE_TOKEN_SECRET env var.
-const BUILD_SECRET = process.env.MEDIAGRAB_BUILD_SECRET
-  || readEnvFile('.env.production', 'MEDIAGRAB_BUILD_SECRET')
+// Build-time Ed25519 PUBLIC key (PEM) embedded into the app to verify
+// server-signed license tokens offline. It is PUBLIC — safe to ship; it can
+// only verify, never sign/forge. The matching private key lives only on
+// arqami.app. Set MEDIAGRAB_PUBLIC_KEY in your shell before `npm run build`
+// (GitHub Actions passes it as a secret) or in a .env.production file.
+let PUBLIC_KEY = process.env.MEDIAGRAB_PUBLIC_KEY
+  || readEnvFile('.env.production', 'MEDIAGRAB_PUBLIC_KEY')
   || null;
 
 function readEnvFile(name, key) {
@@ -70,11 +72,17 @@ function readEnvFile(name, key) {
   return line ? line.split('=').slice(1).join('=').trim().replace(/^["']|["']$/g, '') : null;
 }
 
-if (!BUILD_SECRET) {
+// Accept a base64-encoded PEM too (convenient for a single-line .env.production).
+if (PUBLIC_KEY && !PUBLIC_KEY.includes('BEGIN PUBLIC KEY')) {
+  try { PUBLIC_KEY = Buffer.from(PUBLIC_KEY, 'base64').toString('utf8'); } catch { /* keep as-is */ }
+}
+
+if (!PUBLIC_KEY || !PUBLIC_KEY.includes('BEGIN PUBLIC KEY')) {
   console.error('');
-  console.error('✗ MEDIAGRAB_BUILD_SECRET is required.');
+  console.error('✗ MEDIAGRAB_PUBLIC_KEY (Ed25519 PEM) is required.');
   console.error('  Set it in your shell or create .env.production with:');
-  console.error('    MEDIAGRAB_BUILD_SECRET="your-secret-matching-arqami-app"');
+  console.error('    MEDIAGRAB_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----"');
+  console.error('  (a base64-encoded PEM is also accepted)');
   console.error('');
   process.exit(1);
 }
@@ -94,14 +102,15 @@ function backupRestore(rel) {
 
 function injectSecrets(code, rel) {
   if (rel !== 'license/client.js') return code;
-  if (!code.includes('__BUILD_TIME_SECRET__')) {
-    throw new Error('license/client.js no longer contains __BUILD_TIME_SECRET__ placeholder');
+  if (!code.includes('__BUILD_TIME_PUBLIC_KEY__')) {
+    throw new Error('license/client.js no longer contains __BUILD_TIME_PUBLIC_KEY__ placeholder');
   }
-  code = code.replace(/'__BUILD_TIME_SECRET__'/g, JSON.stringify(BUILD_SECRET));
-  const ownerKey = process.env.MEDIAGRAB_OWNER_KEY
-    || readEnvFile('.env.production', 'MEDIAGRAB_OWNER_KEY')
-    || '';
-  code = code.replace(/'__BUILD_TIME_OWNER_KEY__'/g, JSON.stringify(ownerKey));
+  // Inject the (public) Ed25519 verification key. JSON.stringify keeps the
+  // PEM newlines as a valid JS string literal.
+  code = code.replace(/'__BUILD_TIME_PUBLIC_KEY__'/g, JSON.stringify(PUBLIC_KEY));
+  // Owner key is intentionally NOT baked into distributed builds anymore: every
+  // copy now requires a real serial. The owner activates manually once.
+  code = code.replace(/'__BUILD_TIME_OWNER_KEY__'/g, JSON.stringify(''));
   return code;
 }
 

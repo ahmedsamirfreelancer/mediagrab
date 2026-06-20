@@ -22,11 +22,14 @@ const API_BASE = process.env.MEDIAGRAB_LICENSE_API || 'https://arqami.app/api/li
 const PRODUCT_SLUG = 'mediagrab';
 const APP_VERSION = '1.0.0';
 
-// Token signing secret. MUST match arqami.app's LICENSE_TOKEN_SECRET env var.
-// At build time, scripts/obfuscate.js replaces the placeholder string below
-// with whatever value is in MEDIAGRAB_BUILD_SECRET (or .env.production).
-// In dev, MEDIAGRAB_LICENSE_SECRET env can override.
-const TOKEN_SECRET = process.env.MEDIAGRAB_LICENSE_SECRET || '__BUILD_TIME_SECRET__';
+// Ed25519 PUBLIC key used to verify server-signed tokens offline. It is safe
+// to ship in readable form — a public key can only VERIFY, never sign/forge.
+// The matching PRIVATE key never leaves arqami.app. At build time,
+// scripts/obfuscate.js replaces the placeholder below with the real PEM.
+// In dev, MEDIAGRAB_LICENSE_PUBKEY (base64 of the PEM) can override.
+const PUBLIC_KEY_PEM = process.env.MEDIAGRAB_LICENSE_PUBKEY
+  ? Buffer.from(process.env.MEDIAGRAB_LICENSE_PUBKEY, 'base64').toString('utf8')
+  : '__BUILD_TIME_PUBLIC_KEY__';
 
 // Optional owner license key. If a value is baked in at build time, the app
 // will auto-activate with it on first launch (no manual key entry needed for
@@ -110,8 +113,9 @@ function getHardwareFingerprint() {
 }
 
 /**
- * Verify the server-signed token offline. Matches the server's
- * generateLicenseToken format: base64(`${product}|${domain}|${tokenExp}|${licExp}:${hmacSig}`)
+ * Verify the server-signed token offline using the embedded Ed25519 public key.
+ * Server's generateLicenseToken format:
+ *   base64(`${product}|${domain}|${tokenExp}|${licExp}:${ed25519SigBase64}`)
  */
 function verifyToken(token) {
   if (!token) return { valid: false, reason: 'no_token' };
@@ -121,8 +125,8 @@ function verifyToken(token) {
     if (lastColon === -1) return { valid: false, reason: 'malformed' };
     const payload = decoded.slice(0, lastColon);
     const sig = decoded.slice(lastColon + 1);
-    const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
-    if (sig !== expected) return { valid: false, reason: 'invalid_signature' };
+    const ok = crypto.verify(null, Buffer.from(payload), PUBLIC_KEY_PEM, Buffer.from(sig, 'base64'));
+    if (!ok) return { valid: false, reason: 'invalid_signature' };
     const [product, domain, tokenExpStr] = payload.split('|');
     const tokenExp = parseInt(tokenExpStr, 10);
     if (Math.floor(Date.now() / 1000) > tokenExp) {

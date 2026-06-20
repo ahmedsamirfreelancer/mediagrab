@@ -63,9 +63,11 @@ jobs:
         run: node scripts/download-binaries.js
 
       - name: Obfuscate sources
+        # Only the PUBLIC verification key is injected. No signing secret and no
+        # owner key are baked in, so distributed copies cannot be forged and
+        # every install requires a real serial.
         env:
-          MEDIAGRAB_BUILD_SECRET: ${{ secrets.MEDIAGRAB_BUILD_SECRET }}
-          MEDIAGRAB_OWNER_KEY: ${{ secrets.MEDIAGRAB_OWNER_KEY }}
+          MEDIAGRAB_PUBLIC_KEY: ${{ secrets.MEDIAGRAB_PUBLIC_KEY }}
         run: node scripts/obfuscate.js
 
       - name: Build + publish installer
