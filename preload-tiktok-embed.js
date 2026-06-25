@@ -299,11 +299,18 @@ const { ipcRenderer } = require('electron');
     ipcRenderer.invoke('tiktok-embed:baseDir').then((b) => { baseDir = b || ''; renderBasePath(); }).catch(() => {});
   }
 
+  // A "grid" page is one whose thumbnails are a clean list of videos we want to
+  // button: the search results OR a creator's profile (channel) page. A single
+  // open video (/@user/video/id) is NOT a grid page — its related/creator links
+  // would otherwise get buttons sprayed across the open video.
+  function isGridPage() {
+    const p = location.pathname;
+    if (/^\/@[^/]+\/video\/\d+/.test(p)) return false; // single video / modal
+    return /^\/search/.test(p) || /^\/@[^/]+\/?$/.test(p); // search OR profile grid
+  }
+
   function addButtons() {
-    // Only the search-results page gets buttons. When a video is opened TikTok
-    // navigates to /@user/video/id, whose related/creator links would otherwise
-    // get buttons sprayed across the open video — so bail unless we're on /search.
-    if (!/^\/search/.test(location.pathname)) return;
+    if (!isGridPage()) return;
     for (const a of document.querySelectorAll('a[href*="/video/"]')) {
       const m = (a.getAttribute('href') || '').match(/\/@([^/]+)\/video\/(\d+)/);
       if (!m) continue;
@@ -372,7 +379,7 @@ const { ipcRenderer } = require('electron');
       // When a video is open the path leaves /search → hide all grid buttons so
       // they never bleed over TikTok's video modal.
       const onVideo = /\/@[^/]+\/video\/\d+/.test(location.pathname);
-      document.documentElement.classList.toggle('mg-hide-btns', !/^\/search/.test(location.pathname));
+      document.documentElement.classList.toggle('mg-hide-btns', !isGridPage());
       const curBtn = document.getElementById('mg-current-btn');
       if (curBtn) curBtn.style.display = onVideo ? '' : 'none';
       addButtons();
