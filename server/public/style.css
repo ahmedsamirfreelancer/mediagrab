@@ -1171,6 +1171,18 @@ body {
   gap: 4px;
 }
 
+.card-author-link {
+  cursor: pointer;
+  color: var(--accent, #6366f1);
+  font-weight: 600;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-author-link::before { content: '📺'; font-size: 0.7rem; }
+.card-author-link:hover { text-decoration: underline; }
+
 .card-actions {
   display: flex;
   gap: 6px;

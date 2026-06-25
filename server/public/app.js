@@ -1242,7 +1242,7 @@
       <div class="card-body">
         <div class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
         <div class="card-meta">
-          ${item.author ? `<span>${escapeHtml(item.author)}</span>` : ''}
+          ${item.author ? `<span class="card-author${channelUrlFor(item) ? ' card-author-link' : ''}" title="${channelUrlFor(item) ? 'فتح قناة ' + escapeAttr(item.author) : escapeAttr(item.author)}">${escapeHtml(item.author)}</span>` : ''}
           ${item.views ? `<span>${formatNumber(item.views)} مشاهدة</span>` : ''}
         </div>
         <div class="card-actions">
@@ -1284,6 +1284,15 @@
     // Click thumbnail → open preview
     card.querySelector('.card-thumbnail').addEventListener('click', () => openPreview(item));
 
+    // Click author name → list that channel's videos (cherry-pick & download)
+    const authorLink = card.querySelector('.card-author-link');
+    if (authorLink) {
+      authorLink.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openChannel(item);
+      });
+    }
+
     // Right-click → context menu
     card.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -1291,6 +1300,33 @@
     });
 
     return card;
+  }
+
+  // ─── فتح قناة صاحب الفيديو ───────────────────────────
+  // From a search-result video, work out the URL of its author's channel so we
+  // can list that channel and let the user cherry-pick videos to download.
+  function channelUrlFor(item) {
+    if (!item) return null;
+    // TikTok: prefer the explicit authorId, else parse it out of the video URL
+    // (search results are .../@<unique_id>/video/<id>).
+    let uid = item.authorId
+      || (typeof item.author === 'object' ? item.author?.unique_id : null);
+    if (!uid && item.url) {
+      const m = String(item.url).match(/tiktok\.com\/@([^/?#]+)/i);
+      if (m) uid = m[1];
+    }
+    if (uid) return `https://www.tiktok.com/@${uid}`;
+    // YouTube channel, if the result carried one
+    if (item.channelUrl) return item.channelUrl;
+    return null;
+  }
+
+  function openChannel(item) {
+    const curl = channelUrlFor(item);
+    if (!curl) return toast('مش لاقي قناة لصاحب الفيديو ده', 'warning');
+    if (dom.urlInput) dom.urlInput.value = curl;
+    toast('بفتح قناة ' + (item.author || '') + '...', 'info');
+    fetchInfo(curl);
   }
 
   // ─── Card context menu ──────────────────────────────
@@ -1306,6 +1342,7 @@
       { icon: '🖼',  label: 'تحميل الصورة فقط', run: () => downloadThumbnail(item) },
       { icon: '⏱',  label: 'احفظ للوقت لاحق',   run: () => addToWatchLater(item) },
       'sep',
+      ...(channelUrlFor(item) ? [{ icon: '📺', label: 'فتح قناة الناشر', run: () => openChannel(item) }] : []),
       { icon: '🌐', label: 'فتح في الموقع',   run: () => window.open(url, '_blank', 'noopener') },
     ];
 

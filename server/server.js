@@ -2103,6 +2103,7 @@ app.post('/api/search', async (req, res) => {
             thumbnail: v.cover || v.origin_cover,
             duration: v.duration,
             author: v.author?.nickname || v.author?.unique_id,
+            authorId: v.author?.unique_id || null,
             playCount: v.play_count,
             url: `https://www.tiktok.com/@${v.author?.unique_id}/video/${vid}`,
             downloadUrl: v.play, hdDownloadUrl: v.hdplay,
