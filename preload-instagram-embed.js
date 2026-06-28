@@ -541,6 +541,65 @@ const { ipcRenderer } = require('electron');
     location.assign(order[t]);
   }
 
+  // Loading / empty-state overlay. Instagram's search grid takes a few seconds
+  // to render (the JS hydrates the tiles after first paint), and for a long /
+  // specific query it's slower still. With no feedback the window just looks
+  // blank, so the user closes it thinking the search failed ("no results for a
+  // long name"). This overlay shows a spinner until the first tiles appear, and
+  // if the query genuinely returns nothing after a while it says so clearly.
+  const mgSearchStart = Date.now();
+  function gridTileCount() {
+    let n = 0;
+    for (const a of document.querySelectorAll('a[href*="/reel/"], a[href*="/tv/"], a[href*="/p/"]')) {
+      if (a.querySelector('img') && !a.closest('[role="dialog"]')) n++;
+    }
+    return n;
+  }
+  function ensureOverlay() {
+    if (document.getElementById('mg-loading')) return document.getElementById('mg-loading');
+    if (!document.body) return null;
+    const ov = document.createElement('div');
+    ov.id = 'mg-loading';
+    ov.style.cssText = 'position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:rgba(8,7,14,.92);color:#fff;font-family:sans-serif;direction:rtl;text-align:center;padding:24px;';
+    ov.innerHTML =
+      '<div id="mg-load-spin" style="width:46px;height:46px;border:5px solid #3a3754;border-top-color:#a855f7;border-radius:50%;animation:mgspin 0.9s linear infinite;"></div>' +
+      '<div id="mg-load-msg" style="font-size:16px;font-weight:700;max-width:420px;line-height:1.7;">⏳ بنجيب نتايج البحث من إنستجرام…<br><span style="font-size:13px;font-weight:400;opacity:.8;">الاسم الطويل بياخد ثواني أكتر — استنى شوية</span></div>' +
+      '<button id="mg-load-x" style="background:#374151;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;">تجاهل</button>';
+    if (!document.getElementById('mg-spin-style')) {
+      const st = document.createElement('style');
+      st.id = 'mg-spin-style';
+      st.textContent = '@keyframes mgspin{to{transform:rotate(360deg)}}';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    (document.body || document.documentElement).appendChild(ov);
+    ov.querySelector('#mg-load-x').addEventListener('click', () => { ov.dataset.dismissed = '1'; ov.style.display = 'none'; });
+    return ov;
+  }
+  function manageLoadingOverlay() {
+    // Only on the keyword-search page; the single-reel viewer & profiles manage
+    // themselves.
+    if (!/^\/explore\/search/.test(location.pathname)) {
+      const ex = document.getElementById('mg-loading');
+      if (ex) ex.style.display = 'none';
+      return;
+    }
+    const tiles = gridTileCount();
+    const ov = document.getElementById('mg-loading');
+    if (tiles > 0) { if (ov) ov.style.display = 'none'; return; }
+    // No tiles yet.
+    const elapsed = Date.now() - mgSearchStart;
+    const o = ov || ensureOverlay();
+    if (!o || o.dataset.dismissed === '1') return;
+    o.style.display = 'flex';
+    // After ~13s with still nothing, call it a genuine empty result.
+    if (elapsed > 13000) {
+      const spin = document.getElementById('mg-load-spin');
+      const msg = document.getElementById('mg-load-msg');
+      if (spin) spin.style.display = 'none';
+      if (msg) msg.innerHTML = '🔍 إنستجرام مرجّعش أي نتايج للبحث ده.<br><span style="font-size:13px;font-weight:400;opacity:.85;">جرّب كلمة أقصر أو أعم (مثلاً كلمة-كلمتين بدل الجملة كاملة).</span>';
+    }
+  }
+
   function tick() {
     try {
       injectStyle();
@@ -562,6 +621,7 @@ const { ipcRenderer } = require('electron');
       if (curBtn) curBtn.style.display = onSingleItem() ? '' : 'none';
       addButtons();
       curateGrid();
+      manageLoadingOverlay();
       // Returned to the grid from a single reel → restore scroll position.
       if (listingNow && !mgPrevListing) restoreScrollSoon();
       mgPrevListing = listingNow;
