@@ -212,6 +212,30 @@
     </div>
   </div>
 
+  <!-- Product Notes Modal (creatives checklist) -->
+  <div id="notes-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>📝 منتجات الكرييتفات</h2>
+        <button class="modal-close" id="notes-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="notes-add-row">
+          <input type="text" id="notes-input" placeholder="اكتب اسم المنتج واضغط Enter..." spellcheck="false" autocomplete="off">
+          <button class="btn btn-primary" id="notes-add-btn">➕ إضافة</button>
+        </div>
+        <div class="notes-progress" id="notes-progress"></div>
+        <div id="notes-body">
+          <div class="history-empty">لسه مفيش منتجات — اكتب اسم منتج فوق وضيفه</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="notes-clear-done" title="مسح المنتجات اللي اتحمّلت">🧹 مسح المُحمّل</button>
+        <button class="btn btn-danger" id="notes-clear-all">مسح الكل</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Stats Modal -->
   <div id="stats-modal" class="modal-overlay hidden">
     <div class="modal">
@@ -297,6 +321,9 @@
         </div>
         <button class="icon-btn" id="stats-btn" title="إحصائيات">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        </button>
+        <button class="icon-btn" id="notes-btn" title="قائمة منتجات الكرييتفات">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
         </button>
         <button class="icon-btn" id="bookmarks-btn" title="المفضلة">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>

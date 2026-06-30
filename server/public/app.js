@@ -93,6 +93,15 @@
     bookmarksModal: $('#bookmarks-modal'),
     bookmarksClose: $('#bookmarks-close'),
     bookmarksBody: $('#bookmarks-body'),
+    notesBtn: $('#notes-btn'),
+    notesModal: $('#notes-modal'),
+    notesClose: $('#notes-close'),
+    notesBody: $('#notes-body'),
+    notesInput: $('#notes-input'),
+    notesAddBtn: $('#notes-add-btn'),
+    notesProgress: $('#notes-progress'),
+    notesClearDone: $('#notes-clear-done'),
+    notesClearAll: $('#notes-clear-all'),
     bookmarkCurrentBtn: $('#bookmark-current-btn'),
     viewGridBtn: $('#view-grid-btn'),
     viewListBtn: $('#view-list-btn'),
@@ -1541,6 +1550,102 @@
     } finally {
       showLoading(false);
     }
+  }
+
+  // ─── Product Notes (creatives checklist) ────────────
+  // قائمة بأسماء المنتجات اللي المستخدم هينزّل لها كرييتفات.
+  // كل منتج يتعلّم عليه ✓ بعد ما يتحمّل. محفوظة في localStorage فتفضل بعد قفل البرنامج.
+  const NOTES_KEY = 'mediagrab_product_notes';
+
+  function loadNotes() {
+    try { return JSON.parse(localStorage.getItem(NOTES_KEY)) || []; }
+    catch { return []; }
+  }
+  function saveNotes(list) {
+    try { localStorage.setItem(NOTES_KEY, JSON.stringify(list)); } catch {}
+  }
+
+  function openNotes() {
+    if (!dom.notesModal) return;
+    renderNotes();
+    dom.notesModal.classList.remove('hidden');
+    if (dom.notesInput) setTimeout(() => dom.notesInput.focus(), 50);
+  }
+
+  function addNote() {
+    const name = (dom.notesInput?.value || '').trim();
+    if (!name) return;
+    const list = loadNotes();
+    if (list.some((n) => n.name.toLowerCase() === name.toLowerCase())) {
+      toast('المنتج ده موجود في القائمة بالفعل', 'warning');
+      dom.notesInput.value = '';
+      return;
+    }
+    list.unshift({ id: 'n' + Date.now() + Math.floor(Math.random() * 1000), name, done: false, createdAt: Date.now() });
+    saveNotes(list);
+    dom.notesInput.value = '';
+    renderNotes();
+  }
+
+  function updateNote(id, patch) {
+    const list = loadNotes();
+    const item = list.find((n) => n.id === id);
+    if (!item) return;
+    Object.assign(item, patch);
+    saveNotes(list);
+    renderNotes();
+  }
+
+  function deleteNote(id) {
+    saveNotes(loadNotes().filter((n) => n.id !== id));
+    renderNotes();
+  }
+
+  function renderNotes() {
+    if (!dom.notesBody) return;
+    const list = loadNotes();
+    // المُحمّل ينزل تحت، والباقي بترتيب الإضافة (الأحدث فوق)
+    list.sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1));
+    const doneCount = list.filter((n) => n.done).length;
+
+    if (dom.notesProgress) {
+      dom.notesProgress.textContent = list.length
+        ? `اتحمّل ${doneCount} من ${list.length} منتج`
+        : '';
+    }
+
+    if (!list.length) {
+      dom.notesBody.innerHTML = '<div class="history-empty">لسه مفيش منتجات — اكتب اسم منتج فوق وضيفه</div>';
+      return;
+    }
+
+    dom.notesBody.innerHTML = '';
+    list.forEach((n) => {
+      const el = document.createElement('div');
+      el.className = 'note-item' + (n.done ? ' note-done' : '');
+      el.innerHTML = `
+        <label class="note-check" title="علّم لما تحمّل كرييتفات المنتج">
+          <input type="checkbox" ${n.done ? 'checked' : ''}>
+        </label>
+        <div class="note-name">${escapeHtml(n.name)}</div>
+        <div class="note-actions">
+          <button class="btn btn-secondary btn-sm note-search" title="ابحث عن المنتج ده دلوقتي">🔍 ابحث</button>
+          <button class="icon-btn note-delete" title="حذف">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>
+      `;
+      el.querySelector('input[type=checkbox]').addEventListener('change', (e) => {
+        updateNote(n.id, { done: e.target.checked });
+      });
+      el.querySelector('.note-search').addEventListener('click', () => {
+        dom.notesModal.classList.add('hidden');
+        if (dom.searchInput) dom.searchInput.value = n.name;
+        searchVideos(n.name);
+      });
+      el.querySelector('.note-delete').addEventListener('click', () => deleteNote(n.id));
+      dom.notesBody.appendChild(el);
+    });
   }
 
   // ─── Stats panel ────────────────────────────────────
@@ -3252,6 +3357,30 @@
       if (e.target === dom.bookmarksModal) dom.bookmarksModal.classList.add('hidden');
     });
     if (dom.bookmarkCurrentBtn) dom.bookmarkCurrentBtn.addEventListener('click', bookmarkCurrent);
+
+    // Product notes (creatives checklist)
+    if (dom.notesBtn) dom.notesBtn.addEventListener('click', openNotes);
+    if (dom.notesClose) dom.notesClose.addEventListener('click', () => dom.notesModal.classList.add('hidden'));
+    if (dom.notesModal) dom.notesModal.addEventListener('click', (e) => {
+      if (e.target === dom.notesModal) dom.notesModal.classList.add('hidden');
+    });
+    if (dom.notesAddBtn) dom.notesAddBtn.addEventListener('click', addNote);
+    if (dom.notesInput) dom.notesInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addNote(); }
+    });
+    if (dom.notesClearDone) dom.notesClearDone.addEventListener('click', () => {
+      const list = loadNotes();
+      if (!list.some((n) => n.done)) return toast('مفيش منتجات متعلّم عليها', 'info');
+      if (!confirm('مسح كل المنتجات اللي اتحمّلت من القائمة؟')) return;
+      saveNotes(list.filter((n) => !n.done));
+      renderNotes();
+    });
+    if (dom.notesClearAll) dom.notesClearAll.addEventListener('click', () => {
+      if (!loadNotes().length) return;
+      if (!confirm('مسح كل قائمة المنتجات؟')) return;
+      saveNotes([]);
+      renderNotes();
+    });
 
     // View toggle
     if (dom.viewGridBtn) dom.viewGridBtn.addEventListener('click', () => setView('grid'));
