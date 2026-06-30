@@ -315,13 +315,26 @@ async function instagramResolvePhotoUrls(postUrl, cookiesFile) {
   const mediaId = instagramShortcodeToMediaId(m[1]);
   if (!mediaId) return [];
   const cookies = parseNetscapeCookies(cookiesFile);
-  if (!cookies.sessionid) return [];
+  // No login → can't reach the media-info API at all. Signal it so the caller
+  // shows a clear "log in first" message instead of a vague red error.
+  if (!cookies.sessionid) throw new Error('IG_LOGIN_REQUIRED');
   const data = await instagramApiGet(`https://i.instagram.com/api/v1/media/${mediaId}/info/`, cookies);
   const item = (data.items && data.items[0]) || null;
   if (!item) return [];
+  // A single video that the grid heuristic mislabelled as a photo: don't save
+  // its cover image silently — signal the caller to pull the real video.
+  if (!item.carousel_media && (item.media_type === 2 || (item.video_versions && item.video_versions.length))) {
+    throw new Error('IG_IS_VIDEO');
+  }
   const slides = item.carousel_media || [item];
   const urls = [];
   for (const s of slides) {
+    // Mixed carousel: a video slide returns its real mp4 (downloadFile names it
+    // .mp4 from the content-type), not just a cover image.
+    if (s.video_versions && s.video_versions.length) {
+      const bestV = s.video_versions.slice().sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+      if (bestV && bestV.url) { urls.push(bestV.url); continue; }
+    }
     // Pick the highest-resolution image candidate (first is usually largest).
     const cands = (s.image_versions2 && s.image_versions2.candidates) || [];
     if (cands.length) {
@@ -796,10 +809,15 @@ async function tikwmGetVideo(videoUrl, retries = 4) {
       });
       if (data.code === 0 && data.data) {
         const d = data.data;
+        // Photo/slideshow posts come back with an `images` array and no
+        // playable video — surface it so the download path can pull the images.
+        const images = Array.isArray(d.images) ? d.images.filter(Boolean)
+          : (d.images ? [d.images] : null);
         return {
           id: d.id,
           play: d.play,
           hdplay: d.hdplay,
+          images: (images && images.length) ? images : null,
           title: d.title,
           cover: d.cover || d.origin_cover,
           music: d.music,
@@ -1460,6 +1478,9 @@ app.post('/api/download', async (req, res) => {
               title: (tikInfo?.title || v.title || `Video ${v.id}`).substring(0, 100),
               downloadUrl: tikInfo?.play || null,
               hdDownloadUrl: tikInfo?.hdplay || null,
+              // Photo posts in a profile: carry the slides + music too.
+              images: (tikInfo?.images && tikInfo.images.length) ? tikInfo.images : null,
+              musicUrl: tikInfo?.music || null,
               author: username,
               platform: 'tiktok',
             };
@@ -1475,6 +1496,11 @@ app.post('/api/download', async (req, res) => {
           tasks[0].title = tikInfo.title || tasks[0].title;
           tasks[0].downloadUrl = tikInfo.play;
           tasks[0].hdDownloadUrl = tikInfo.hdplay;
+          // Carry photo-post images + music so runDownloadOnce downloads the
+          // slides (not the background audio). Without this the pre-resolve sets
+          // downloadUrl=audio and the images get dropped.
+          if (tikInfo.images && tikInfo.images.length) tasks[0].images = tikInfo.images;
+          if (tikInfo.music) tasks[0].musicUrl = tikInfo.music;
         }
       }
     }
@@ -1516,13 +1542,14 @@ app.post('/api/download', async (req, res) => {
             return; // success
           } catch (err) {
             lastErr = err;
-            // "Not a video" is a known dead-end (Instagram photo post). Don't
-            // retry and surface it as a graceful skip rather than red error.
-            if (/NOT_A_VIDEO/.test(err.message)) {
+            // Known dead-ends (photo posts, login needed, unresolvable pins).
+            // Don't retry — surface a clear graceful skip, not a red error.
+            const skipMsg = gracefulSkipMessage(err.message);
+            if (skipMsg) {
               emitProgress(task.id, {
                 title: task.title, progress: 100, speed: '',
                 status: 'completed', skipped: true,
-                error: 'تخطّى — البوست ده صور مش فيديو',
+                error: skipMsg,
               });
               activeDownloads.delete(task.id);
               return;
@@ -1546,6 +1573,18 @@ app.post('/api/download', async (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 });
+
+// Map a known dead-end error signal to a friendly Arabic skip message. Returns
+// null for genuine failures (which should retry / surface as a red error).
+function gracefulSkipMessage(msg) {
+  if (!msg) return null;
+  if (/NOT_A_VIDEO/.test(msg))       return 'تخطّى — البوست ده صور مش فيديو';
+  if (/IG_LOGIN_REQUIRED/.test(msg)) return 'محتاج تسجّل دخول انستجرام من الإعدادات الأول عشان تنزّل الصور';
+  if (/IG_NO_MEDIA/.test(msg))       return 'تخطّى — مش لاقي صور في البوست ده';
+  if (/FB_NOT_VIDEO/.test(msg))      return 'تخطّى — ده مش فيديو على فيسبوك';
+  if (/PIN_UNRESOLVABLE/.test(msg))  return 'تخطّى — مش قادر أجيب المحتوى من البِن ده (غالباً idea/story pin)';
+  return null;
+}
 
 // Single attempt at downloading a task. Throws on failure so the caller can retry.
 async function runDownloadOnce(task, entry, ctx) {
@@ -1614,16 +1653,55 @@ async function runDownloadOnce(task, entry, ctx) {
     const destBase = uniquePath(path.join(adDir, filenameBase + ext));
     filePath = await downloadFile(task.downloadUrl, destBase, task.id, task.title);
   } else if (plat === 'tiktok') {
-    if (!task.downloadUrl && !task.hdDownloadUrl) {
+    if (!task.downloadUrl && !task.hdDownloadUrl && !(task.images && task.images.length)) {
       const tikInfo = await tikwmGetVideo(task.url);
       if (tikInfo) {
         task.downloadUrl = tikInfo.play;
         task.hdDownloadUrl = tikInfo.hdplay;
         task.title = tikInfo.title || task.title;
+        if (tikInfo.images && tikInfo.images.length) task.images = tikInfo.images;
+        if (tikInfo.music) task.musicUrl = tikInfo.music;
       }
     }
     const videoUrl = task.hdDownloadUrl || task.downloadUrl;
 
+    if (task.images && task.images.length) {
+      // Photo/slideshow post. An `images` array is TikWM's authoritative signal
+      // for a photo post — and for these its `play` is just the background audio
+      // (or an auto-generated slideshow), NOT the real content. So images win
+      // over any `play` URL here; we only fall to the video path when there are
+      // no images at all.
+      if (quality === 'audio' && task.musicUrl) {
+        // Audio mode: there are no video frames to extract from, so pull the
+        // post's music track directly. downloadFile names it from the
+        // content-type; convert to mp3 if it came back as m4a/other.
+        const tmp = uniquePath(path.join(taskOutputDir, filenameBase + '.mp3'));
+        filePath = await downloadFile(task.musicUrl, tmp, task.id, task.title);
+        if (!/\.mp3$/i.test(filePath)) {
+          const mp3Path = uniquePath(filePath.replace(/\.[a-z0-9]+$/i, '.mp3'));
+          emitProgress(task.id, { title: task.title, progress: 99, speed: '', status: 'downloading', eta: 'converting' });
+          await extractAudioToMp3(filePath, mp3Path);
+          try { fs.unlinkSync(filePath); } catch {}
+          filePath = mp3Path;
+        }
+      } else {
+        // Download each slide straight (like Instagram photos / Pinterest image
+        // pins). downloadFile detects the real extension from the content-type,
+        // so the .jpg here is only a hint.
+        let saved = '';
+        for (let i = 0; i < task.images.length; i++) {
+          if (entry.cancelled) throw new Error('Cancelled');
+          const suffix = task.images.length > 1 ? `_${String(i + 1).padStart(2, '0')}` : '';
+          const destBase = uniquePath(path.join(taskOutputDir, `${filenameBase}${suffix}.jpg`));
+          saved = await downloadFile(task.images[i], destBase, task.id, task.title);
+          emitProgress(task.id, {
+            title: task.title, status: 'downloading',
+            progress: Math.round(((i + 1) / task.images.length) * 100), speed: '',
+          });
+        }
+        filePath = saved;
+      }
+    } else {
     // Skip-if-exists: filenames are now unique per video (title-derived), so
     // a same-named file in the target folder really IS this video. Either the
     // user already downloaded it earlier, or — for audio mode — already
@@ -1689,25 +1767,42 @@ async function runDownloadOnce(task, entry, ctx) {
       try { fs.unlinkSync(filePath); } catch {}
       filePath = mp3Path;
     }
+    }
   } else if (plat === 'instagram' && task.kind === 'photo') {
     // Image post (single or carousel). yt-dlp can't fetch IG photos, so we
     // resolve the real image CDN URLs from the media-info API and pull them
     // straight with downloadFile (which adds the right Instagram Referer).
     const igCookies = path.join(process.env.MEDIAGRAB_DATA_DIR || path.join(__dirname, 'data'), 'instagram-cookies.txt');
-    const imgUrls = await instagramResolvePhotoUrls(task.url, igCookies);
-    if (!imgUrls.length) throw new Error('مفيش صور في البوست ده (أو محتاج تسجيل دخول).');
-    let saved = '';
-    for (let i = 0; i < imgUrls.length; i++) {
-      if (entry.cancelled) throw new Error('Cancelled');
-      const suffix = imgUrls.length > 1 ? `_${String(i + 1).padStart(2, '0')}` : '';
-      const destBase = uniquePath(path.join(taskOutputDir, `${filenameBase}${suffix}.jpg`));
-      saved = await downloadFile(imgUrls[i], destBase, task.id, task.title);
-      emitProgress(task.id, {
-        title: task.title, status: 'downloading',
-        progress: Math.round(((i + 1) / imgUrls.length) * 100), speed: '',
-      });
+    let imgUrls;
+    try {
+      imgUrls = await instagramResolvePhotoUrls(task.url, igCookies);
+    } catch (e) {
+      if (/IG_IS_VIDEO/.test(e.message)) {
+        // Grid mislabelled a video as a photo — pull the real video with yt-dlp
+        // (it injects the IG cookies automatically) instead of a cover image.
+        filePath = await ytdlpDownload(task.url, taskOutputDir, task.id, task.title, quality, filenameBase, {
+          speedLimitKBps, downloadSubs, cookiesFile, customArgs, taskQuality: task.quality, kind: 'video',
+        });
+        imgUrls = null; // already downloaded as video
+      } else {
+        throw e; // IG_LOGIN_REQUIRED (or other) → graceful-skip handler upstream
+      }
     }
-    filePath = saved;
+    if (imgUrls) {
+      if (!imgUrls.length) throw new Error('IG_NO_MEDIA');
+      let saved = '';
+      for (let i = 0; i < imgUrls.length; i++) {
+        if (entry.cancelled) throw new Error('Cancelled');
+        const suffix = imgUrls.length > 1 ? `_${String(i + 1).padStart(2, '0')}` : '';
+        const destBase = uniquePath(path.join(taskOutputDir, `${filenameBase}${suffix}.jpg`));
+        saved = await downloadFile(imgUrls[i], destBase, task.id, task.title);
+        emitProgress(task.id, {
+          title: task.title, status: 'downloading',
+          progress: Math.round(((i + 1) / imgUrls.length) * 100), speed: '',
+        });
+      }
+      filePath = saved;
+    }
   } else if (plat === 'pinterest') {
     // Video pins: yt-dlp handles them (incl. HLS → mp4). Image pins: yt-dlp
     // refuses ("No video formats found"), so we resolve the image off the pin
@@ -1723,7 +1818,7 @@ async function runDownloadOnce(task, entry, ctx) {
       // so we never silently save a video's cover image instead of the video.
       if (!/NO_VIDEO_FORMATS/.test(e.message)) throw e;
       const imgUrls = await pinterestResolveImageUrls(task.url);
-      if (!imgUrls.length) throw e; // not a resolvable image either → original error
+      if (!imgUrls.length) throw new Error('PIN_UNRESOLVABLE'); // idea/story pin, etc.
       let saved = '';
       for (let i = 0; i < imgUrls.length; i++) {
         if (entry.cancelled) throw new Error('Cancelled');
@@ -1741,10 +1836,20 @@ async function runDownloadOnce(task, entry, ctx) {
       filePath = saved;
     }
   } else {
-    filePath = await ytdlpDownload(task.url, taskOutputDir, task.id, task.title, quality, filenameBase, {
-      speedLimitKBps, downloadSubs, cookiesFile, customArgs,
-      taskQuality: task.quality, kind: task.kind,
-    });
+    try {
+      filePath = await ytdlpDownload(task.url, taskOutputDir, task.id, task.title, quality, filenameBase, {
+        speedLimitKBps, downloadSubs, cookiesFile, customArgs,
+        taskQuality: task.quality, kind: task.kind,
+      });
+    } catch (e) {
+      // A Facebook item with no video (a photo card, or a blob/DRM stream
+      // yt-dlp can't extract) → graceful skip with a clear message instead of a
+      // raw "yt-dlp exited with code N" red error. FB has no image fallback.
+      if (/NO_VIDEO_FORMATS/.test(e.message) && isFacebookUrl(task.url)) {
+        throw new Error('FB_NOT_VIDEO');
+      }
+      throw e;
+    }
   }
 
   if (entry.cancelled) throw new Error('Cancelled');

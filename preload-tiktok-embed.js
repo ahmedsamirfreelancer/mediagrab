@@ -264,16 +264,16 @@ const { ipcRenderer } = require('electron');
     // Shown only while a single video is open — downloads that exact video.
     const curBtn = document.createElement('button');
     curBtn.id = 'mg-current-btn';
-    curBtn.textContent = '⬇ حمّل الفيديو المفتوح';
-    curBtn.title = 'يحمّل الفيديو اللي إنت فاتحه دلوقتي';
+    curBtn.textContent = '⬇ حمّل المفتوح';
+    curBtn.title = 'يحمّل الفيديو/الصور اللي إنت فاتحهم دلوقتي';
     curBtn.style.cssText = btnStyle('#16a34a') + 'display:none;';
     curBtn.addEventListener('click', () => {
-      const m = location.pathname.match(/\/@([^/]+)\/video\/(\d+)/);
+      const m = location.pathname.match(/\/@([^/]+)\/(video|photo)\/(\d+)/);
       if (!m) return;
-      const url = 'https://www.tiktok.com/@' + m[1] + '/video/' + m[2];
+      const url = 'https://www.tiktok.com/@' + m[1] + '/' + m[2] + '/' + m[3];
       ipcRenderer.send('tiktok-embed:download', { url, folder: currentFolder() });
       curBtn.textContent = '✓ في الطابور';
-      setTimeout(() => { curBtn.textContent = '⬇ حمّل الفيديو المفتوح'; }, 2500);
+      setTimeout(() => { curBtn.textContent = '⬇ حمّل المفتوح'; }, 2500);
     });
     row2.appendChild(curBtn);
 
@@ -305,23 +305,25 @@ const { ipcRenderer } = require('electron');
   // would otherwise get buttons sprayed across the open video.
   function isGridPage() {
     const p = location.pathname;
-    if (/^\/@[^/]+\/video\/\d+/.test(p)) return false; // single video / modal
+    if (/^\/@[^/]+\/(?:video|photo)\/\d+/.test(p)) return false; // single post / modal
     return /^\/search/.test(p) || /^\/@[^/]+\/?$/.test(p); // search OR profile grid
   }
 
   function addButtons() {
     if (!isGridPage()) return;
-    for (const a of document.querySelectorAll('a[href*="/video/"]')) {
-      const m = (a.getAttribute('href') || '').match(/\/@([^/]+)\/video\/(\d+)/);
+    // Match both videos (/video/) and photo/slideshow posts (/photo/) — TikTok
+    // photo posts use a /photo/ URL, and the server resolves their images.
+    for (const a of document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]')) {
+      const m = (a.getAttribute('href') || '').match(/\/@([^/]+)\/(video|photo)\/(\d+)/);
       if (!m) continue;
-      const user = m[1], id = m[2];
+      const user = m[1], type = m[2], id = m[3];
       // Skip the opened-video popup (comments/related links live there).
       if (a.closest('[role="dialog"]')) continue;
       // Grid thumbnails only — real cards wrap an <img>; text/comment links don't.
       if (!a.querySelector('img')) continue;
-      // Exactly ONE button per video — TikTok renders several links per card.
+      // Exactly ONE button per post — TikTok renders several links per card.
       if (document.querySelector('.' + BTN_CLASS + '[data-vid="' + id + '"]')) continue;
-      const url = 'https://www.tiktok.com/@' + user + '/video/' + id;
+      const url = 'https://www.tiktok.com/@' + user + '/' + type + '/' + id;
       if (getComputedStyle(a).position === 'static') a.style.position = 'relative';
       const btn = document.createElement('button');
       btn.className = BTN_CLASS;
@@ -378,7 +380,7 @@ const { ipcRenderer } = require('electron');
       pushPageDown();
       // When a video is open the path leaves /search → hide all grid buttons so
       // they never bleed over TikTok's video modal.
-      const onVideo = /\/@[^/]+\/video\/\d+/.test(location.pathname);
+      const onVideo = /\/@[^/]+\/(?:video|photo)\/\d+/.test(location.pathname);
       document.documentElement.classList.toggle('mg-hide-btns', !isGridPage());
       const curBtn = document.getElementById('mg-current-btn');
       if (curBtn) curBtn.style.display = onVideo ? '' : 'none';

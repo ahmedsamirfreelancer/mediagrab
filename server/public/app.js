@@ -2680,7 +2680,7 @@
         // Clean ASCII filename from the video id (NOT the raw URL — that made
         // unopenable names like "https___www...mp4").
         const items = urls.map((u) => {
-          const id = (u.match(/\/video\/(\d+)/) || [])[1];
+          const id = (u.match(/\/(?:video|photo)\/(\d+)/) || [])[1];
           return { id: undefined, url: u, title: id ? ('tiktok_' + id) : u, platform: 'tiktok' };
         });
         startBatchDownload(items, { outputDir: base, subfolder: sub, ignoreGlobalDedupe: true });
