@@ -246,7 +246,10 @@ async function validate() {
   if (result?.success && result.valid) {
     cache.status = 'active';
     cache.lastValid = Date.now();
-    cache.expiresAt = result.expires_at || cache.expiresAt;
+    // Trust the server's expiry verbatim — including null (lifetime license).
+    // Using `|| cache.expiresAt` here would keep a stale old date and lock a
+    // machine that the server now considers lifetime.
+    cache.expiresAt = result.expires_at != null ? result.expires_at : null;
     if (result.token) {
       cache.token = result.token;
       cache.tokenSavedAt = Date.now();
