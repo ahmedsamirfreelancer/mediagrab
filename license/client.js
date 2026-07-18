@@ -38,7 +38,7 @@ const PUBLIC_KEY_PEM = process.env.MEDIAGRAB_LICENSE_PUBKEY
 // is set in the build env.
 const OWNER_KEY = process.env.MEDIAGRAB_OWNER_KEY || '__BUILD_TIME_OWNER_KEY__';
 
-const GRACE_DAYS = 3;
+const GRACE_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let storeFile = null;
@@ -79,14 +79,21 @@ let cachedFingerprint = null;
  * letter remaps. Set fresh by sysprep/clone.
  */
 function readWindowsMachineGuid() {
-  try {
-    const out = execSync(
-      'reg query "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
-      { encoding: 'utf8', windowsHide: true, timeout: 3000 }
-    );
-    const m = out.match(/MachineGuid\s+REG_SZ\s+([a-f0-9-]+)/i);
-    return m ? m[1].toLowerCase() : null;
-  } catch { return null; }
+  // Retry a few times: on a busy/slow boot (antivirus, disk churn) a single
+  // reg query can time out. A miss here used to drop us to the volatile
+  // CPU-hash fallback below, producing a DIFFERENT fingerprint and kicking the
+  // user to the activation screen. Retrying makes that far less likely.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const out = execSync(
+        'reg query "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
+        { encoding: 'utf8', windowsHide: true, timeout: 8000 }
+      );
+      const m = out.match(/MachineGuid\s+REG_SZ\s+([a-f0-9-]+)/i);
+      if (m) return m[1].toLowerCase();
+    } catch { /* retry */ }
+  }
+  return null;
 }
 
 /**
@@ -103,9 +110,17 @@ function getHardwareFingerprint() {
       cachedFingerprint = crypto.createHash('sha256').update('mediagrab:' + guid).digest('hex').substring(0, 32);
       return cachedFingerprint;
     }
+    // MachineGuid unreadable this boot. Do NOT invent a fresh CPU-hash — that
+    // would differ from the GUID-based id we activated with and log the user
+    // out. Reuse the last-known fingerprint persisted at activation instead.
+    if (cache && cache.fingerprint) {
+      cachedFingerprint = cache.fingerprint;
+      return cachedFingerprint;
+    }
   }
 
-  // Fallback: stable hardware attributes (no username, no homedir).
+  // Fallback (non-Windows, or Windows with no GUID and no stored id yet):
+  // stable hardware attributes (no username, no homedir).
   const cpu = os.cpus()[0]?.model || 'unknown';
   const raw = `${process.platform}|${os.arch()}|${cpu}|${os.totalmem()}`;
   cachedFingerprint = crypto.createHash('sha256').update(raw).digest('hex').substring(0, 32);
@@ -258,13 +273,30 @@ async function validate() {
     return { valid: true, source: 'server' };
   }
 
-  // Server says invalid
-  cache.status = result?.reason === 'revoked' ? 'revoked'
-              : result?.reason === 'expired' ? 'expired'
+  // Only an EXPLICIT negative verdict from the server should log the user out.
+  // A server error (500 / malformed / success:false with no verdict) is a
+  // transient glitch — deploys, DB hiccups — and must NOT wipe the license.
+  // Treat it like "unreachable" and fall back to the grace window instead of
+  // marking the machine invalid and nuking the token.
+  const explicitReason = result?.success === true
+    && result.valid === false
+    && (result.reason === 'revoked' || result.reason === 'expired' || result.reason === 'invalid_key');
+
+  if (!explicitReason) {
+    const since = Date.now() - (cache.lastValid || 0);
+    if (since < GRACE_DAYS * DAY_MS) {
+      return { valid: true, source: 'grace', warn: 'Validation glitch, using grace period' };
+    }
+    return { valid: false, reason: 'server_error' };
+  }
+
+  // Server explicitly says the license is dead.
+  cache.status = result.reason === 'revoked' ? 'revoked'
+              : result.reason === 'expired' ? 'expired'
               : 'invalid';
   cache.token = null;
   writeStore();
-  return { valid: false, reason: result?.reason || 'invalid' };
+  return { valid: false, reason: result.reason };
 }
 
 /**
@@ -292,9 +324,12 @@ async function tryAutoActivateWithOwnerKey() {
 function isValid() {
   if (cache.status !== 'active') return false;
   if (cache.expiresAt && new Date(cache.expiresAt) < new Date()) return false;
-  // Hardware match
-  if (cache.fingerprint && cache.fingerprint !== getHardwareFingerprint()) return false;
-  // Token signature (offline check)
+  // NOTE: we deliberately do NOT hard-fail on a fingerprint mismatch here.
+  // mediagrab is a lifetime license that follows the machine — if the
+  // fingerprint drifts, the server rebinds it on the next validate(). Kicking
+  // the user to the activation screen synchronously (before that server heal
+  // could run) was the main cause of the "logs out after a while" complaints.
+  // The signed token already binds the domain; trust it + the grace window.
   const tokCheck = verifyToken(cache.token);
   if (tokCheck.valid) return true;
   // Token expired — fall back to grace window
