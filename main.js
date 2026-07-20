@@ -225,33 +225,24 @@ ipcMain.handle('shell:openPath', async (_evt, filePath) => {
  * lens.google.com/v3/upload is the current one and needs the image under the
  * multipart field name "encoded_image".
  */
-// Upload the image to a temporary public host so Google can fetch it by URL.
-// litterbox auto-deletes the file after 1 hour, so the screenshot only lives
-// publicly for the short window needed to run the search.
-function uploadToLitterbox(buffer, mime) {
+// Low-level multipart POST. Resolves with { status, text }; rejects only on
+// a transport/timeout error so the caller can decide what a non-2xx means.
+function postMultipart({ hostname, path, fields = {}, fileField, filename, mime, buffer }) {
   return new Promise((resolve, reject) => {
     const https = require('https');
     const boundary = '----MediaGrabLB' + Date.now();
-    const ext = /png/i.test(mime || '') ? 'png'
-              : /webp/i.test(mime || '') ? 'webp'
-              : 'jpg';
     const textField = (name, val) => Buffer.from(
       `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${val}\r\n`, 'utf8');
-    const fileHead = Buffer.from(
+    const parts = Object.entries(fields).map(([k, v]) => textField(k, v));
+    parts.push(Buffer.from(
       `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="fileToUpload"; filename="image.${ext}"\r\n` +
-      `Content-Type: ${mime || 'image/png'}\r\n\r\n`, 'utf8');
-    const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
-    const body = Buffer.concat([
-      textField('reqtype', 'fileupload'),
-      textField('time', '1h'),
-      fileHead, buffer, tail,
-    ]);
+      `Content-Disposition: form-data; name="${fileField}"; filename="${filename}"\r\n` +
+      `Content-Type: ${mime || 'image/png'}\r\n\r\n`, 'utf8'));
+    parts.push(buffer, Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
+    const body = Buffer.concat(parts);
 
     const req = https.request({
-      hostname: 'litterbox.catbox.moe',
-      path: '/resources/internals/api.php',
-      method: 'POST',
+      hostname, path, method: 'POST',
       headers: {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'Content-Length': body.length,
@@ -260,11 +251,7 @@ function uploadToLitterbox(buffer, mime) {
     }, (res) => {
       let data = '';
       res.on('data', (c) => (data += c));
-      res.on('end', () => {
-        const url = (data || '').trim();
-        if (/^https?:\/\//i.test(url)) resolve(url);
-        else reject(new Error('فشل رفع الصورة: ' + url.slice(0, 120)));
-      });
+      res.on('end', () => resolve({ status: res.statusCode || 0, text: (data || '').trim() }));
     });
     req.on('error', reject);
     req.setTimeout(30000, () => req.destroy(new Error('انتهى وقت رفع الصورة')));
@@ -273,13 +260,59 @@ function uploadToLitterbox(buffer, mime) {
   });
 }
 
+// Upload the image to a temporary public host so Google can fetch it by URL.
+// We try several hosts in order — the primary (litterbox) is flaky and
+// sometimes answers with a 500 HTML page, so any single host being down must
+// not break image search. All are short-lived / disposable public hosts.
+async function uploadPublicImage(buffer, mime) {
+  const ext = /png/i.test(mime || '') ? 'png'
+            : /webp/i.test(mime || '') ? 'webp'
+            : 'jpg';
+  const filename = `image.${ext}`;
+  const hosts = [
+    { // litterbox — auto-deletes after 1h; returns the raw URL as plain text
+      hostname: 'litterbox.catbox.moe', path: '/resources/internals/api.php',
+      fields: { reqtype: 'fileupload', time: '1h' }, fileField: 'fileToUpload',
+      parse: (r) => (/^https?:\/\//i.test(r.text) ? r.text : null),
+    },
+    { // catbox — permanent, same API family; reliable fallback
+      hostname: 'catbox.moe', path: '/user/api.php',
+      fields: { reqtype: 'fileupload' }, fileField: 'fileToUpload',
+      parse: (r) => (/^https?:\/\//i.test(r.text) ? r.text : null),
+    },
+    { // tmpfiles.org — JSON { data: { url } }; needs /dl/ for a direct image
+      hostname: 'tmpfiles.org', path: '/api/v1/upload',
+      fields: {}, fileField: 'file',
+      parse: (r) => {
+        try {
+          const u = JSON.parse(r.text)?.data?.url;
+          return u ? u.replace('tmpfiles.org/', 'tmpfiles.org/dl/') : null;
+        } catch { return null; }
+      },
+    },
+  ];
+
+  const errors = [];
+  for (const h of hosts) {
+    try {
+      const res = await postMultipart({ ...h, filename, mime, buffer });
+      const url = h.parse(res);
+      if (url) return url;
+      errors.push(`${h.hostname}: ${res.status} ${res.text.slice(0, 60)}`);
+    } catch (e) {
+      errors.push(`${h.hostname}: ${e.message}`);
+    }
+  }
+  throw new Error('فشل رفع الصورة (كل الاستضافات): ' + errors.join(' | ').slice(0, 200));
+}
+
 ipcMain.handle('image:reverseSearch', async (_evt, bytes, mime) => {
   try {
     const buffer = Buffer.from(bytes);
     if (!buffer.length) return { success: false, error: 'الصورة فاضية' };
 
     // 1) Host the image temporarily so Google can fetch it.
-    const publicUrl = await uploadToLitterbox(buffer, mime);
+    const publicUrl = await uploadPublicImage(buffer, mime);
 
     // 2) Let the user's real browser run the Lens search BY URL. The browser
     //    handles the full redirect/cookie chain itself, so results render
