@@ -2468,12 +2468,20 @@
       available: 'في تحديث جديد — بينزّل...',
       downloading: `بينزّل التحديث... ${s.progress || 0}%`,
       downloaded: `تحديث جاهز (v${s.version || ''}) — أعد التشغيل عشان يتثبّت`,
+      // 'manual' = نسخة الماك: التحديث مش بيتثبّت لوحده، بيفتح صفحة التحميل.
+      manual: `في نسخة أحدث (v${s.version || ''}) — نزّلها من صفحة الإصدارات`,
       error: 'تعذّر الفحص — جرّب تاني',
     };
     if (statusEl) statusEl.textContent = labels[s.status] || '—';
-    if (installBtn) installBtn.style.display = (s.status === 'downloaded') ? '' : 'none';
+    const ready = s.status === 'downloaded' || s.status === 'manual';
+    if (installBtn) {
+      installBtn.style.display = ready ? '' : 'none';
+      installBtn.textContent = s.status === 'manual' ? 'افتح صفحة التحميل' : 'أعد التشغيل وثبّت';
+    }
     const banner = document.getElementById('appupdate-banner');
-    if (banner) banner.style.display = (s.status === 'downloaded') ? 'flex' : 'none';
+    if (banner) banner.style.display = ready ? 'flex' : 'none';
+    const bannerBtn = document.getElementById('appupdate-banner-btn');
+    if (bannerBtn && s.status === 'manual') bannerBtn.textContent = 'افتح صفحة التحميل';
   }
 
   async function refreshAppUpdateSection() {
@@ -2497,6 +2505,7 @@
           const r = await window.electronAPI.app.checkForUpdate();
           if (r && r.supported === false) toast('التحديث التلقائي مش متاح في النسخة دي', 'info');
           else if (r && r.error) toast('تعذّر الفحص — اتأكد من النت', 'error');
+          else if (r && r.manual && r.latest && r.latest !== r.current) toast(`في نسخة أحدث v${r.latest} — نزّلها من صفحة الإصدارات`, 'success');
           else if (r && r.latest && r.latest !== r.current) toast(`في تحديث جديد v${r.latest} — بينزّل دلوقتي`, 'success');
           else toast('أنت على آخر نسخة ✓', 'success');
         } catch (e) { toast('تعذّر الفحص — اتأكد من النت', 'error'); }

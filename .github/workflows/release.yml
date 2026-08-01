@@ -91,3 +91,70 @@ jobs:
           git add package.json package-lock.json
           git commit -m "chore: release v$(node -p \"require('./package.json').version\")"
           git push
+
+  build-mac:
+    # Runs AFTER the Windows job (and one arch at a time) on purpose: all three
+    # builds publish assets into the SAME GitHub release, and parallel uploads
+    # race each other into "release already exists" / half-uploaded assets.
+    needs: build-windows
+    runs-on: macos-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        arch: [arm64, x64]
+    env:
+      # Tells scripts/download-binaries.js WHICH ffmpeg/ffprobe to fetch — the
+      # runner is Apple Silicon, so without this the x64 build would ship arm
+      # binaries that can't run on an Intel Mac.
+      MEDIAGRAB_TARGET_PLATFORM: darwin
+      MEDIAGRAB_TARGET_ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Cache downloaded binaries
+        id: cache-binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            resources/yt-dlp
+            resources/ffmpeg
+            resources/ffprobe
+          # Per-arch key: the two archs need different ffmpeg builds.
+          key: mediagrab-binaries-mac-${{ matrix.arch }}-2026-08
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Download bundled binaries (if not cached)
+        if: steps.cache-binaries.outputs.cache-hit != 'true'
+        run: node scripts/download-binaries.js
+
+      - name: Obfuscate sources
+        env:
+          MEDIAGRAB_PUBLIC_KEY: ${{ secrets.MEDIAGRAB_PUBLIC_KEY }}
+        run: node scripts/obfuscate.js
+
+      - name: Build + publish .dmg
+        # UNSIGNED build (no Apple Developer ID on this account yet), hence
+        # CSC_IDENTITY_AUTO_DISCOVERY=false — otherwise electron-builder hunts
+        # for a keychain cert and fails the job. Consequences for the user:
+        # Gatekeeper needs one right-click → Open (or the xattr command in the
+        # README), and in-app auto-update is replaced by a "download the new
+        # version" prompt (see setupMacUpdateCheck in main.js).
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish always
+
+      - name: Restore original sources
+        if: always()
+        run: node scripts/restore.js

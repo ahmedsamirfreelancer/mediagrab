@@ -1,6 +1,6 @@
 {
   "name": "mediagrab",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "description": "MediaGrab — Multi-platform video downloader",
   "main": "main.js",
   "author": "Ahmed",
@@ -12,7 +12,8 @@
     "obfuscate": "node scripts/obfuscate.js",
     "restore": "node scripts/restore.js",
     "build": "node scripts/obfuscate.js && electron-builder --win nsis && node scripts/restore.js",
-    "build:noobf": "electron-builder --win nsis"
+    "build:noobf": "electron-builder --win nsis",
+    "build:mac": "node scripts/obfuscate.js && electron-builder --mac && node scripts/restore.js"
   },
   "dependencies": {
     "electron-updater": "^6.3.9",
@@ -55,6 +56,7 @@
         ]
       }
     ],
+    "afterPack": "scripts/afterPack-adhoc-sign.js",
     "asar": true,
     "asarUnpack": [
       "server/**/*",
@@ -78,6 +80,41 @@
         }
       ],
       "artifactName": "MediaGrab-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "MediaGrab-${version}-${arch}.${ext}",
+      "category": "public.app-category.utilities",
+      "darkModeSupport": true,
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "LSMinimumSystemVersion": "11.0"
+      }
+    },
+    "dmg": {
+      "title": "MediaGrab ${version}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

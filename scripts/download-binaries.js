@@ -15,18 +15,36 @@ const { execSync } = require('child_process');
 const RESOURCES_DIR = path.join(__dirname, '..', 'resources');
 const FORCE = process.env.FORCE_DOWNLOAD === '1';
 
-// yt-dlp.exe is small (~10MB). Use the NIGHTLY channel, not stable: Instagram
+// Which platform/arch we're fetching binaries FOR. Normally the host machine,
+// but CI overrides these so a macOS runner can build the arm64 and x64 apps
+// from the same checkout (each needs its own ffmpeg/ffprobe).
+const TARGET_PLATFORM = process.env.MEDIAGRAB_TARGET_PLATFORM || process.platform;
+const TARGET_ARCH = process.env.MEDIAGRAB_TARGET_ARCH || process.arch;
+const IS_MAC = TARGET_PLATFORM === 'darwin';
+// Binary names the app looks for: Windows keeps .exe, macOS is extensionless.
+const EXE = IS_MAC ? '' : '.exe';
+
+// yt-dlp is small (~10-40MB). Use the NIGHTLY channel, not stable: Instagram
 // (a core platform here) breaks frequently and the fixes land in nightly weeks
 // before they reach a stable release — the stable build is regularly unable to
 // extract Instagram at all ("marked as broken"). The app also self-updates
 // yt-dlp to nightly on launch (see main.js), so what's bundled is just a floor.
-const YTDLP_URL = 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe';
+// `yt-dlp_macos` is a universal2 binary — one file covers Intel + Apple Silicon.
+const YTDLP_ASSET = IS_MAC ? 'yt-dlp_macos' : 'yt-dlp.exe';
+const YTDLP_URL = `https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/${YTDLP_ASSET}`;
 
 // ffmpeg/ffprobe are huge (~95MB each). Use the gyan.dev essentials build —
 // a well-maintained Windows static build that's small and battery-included.
 // We extract just the two .exe files we need from the .7z, OR fall back to
 // pre-extracted nightly downloads if 7z isn't available.
 const FFMPEG_RELEASE_URL = 'https://github.com/GyanD/codexffmpeg/releases/download/2024-09-30-git-44a108ce69/ffmpeg-2024-09-30-git-44a108ce69-essentials_build.zip';
+
+// macOS has no equivalent all-in-one zip, so we pull the two static binaries
+// straight from ffmpeg-static's release assets — plain, ready-to-run files,
+// one per arch (arm64 = Apple Silicon, x64 = Intel). No unzip step needed.
+const FFMPEG_STATIC_TAG = 'b6.1.1';
+const macFfmpegUrl = (name) =>
+  `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_STATIC_TAG}/${name}-darwin-${TARGET_ARCH === 'arm64' ? 'arm64' : 'x64'}`;
 
 function exists(p) {
   return fs.existsSync(p) && fs.statSync(p).size > 1024 * 1024; // > 1MB
@@ -73,17 +91,43 @@ function downloadFile(url, dest, attempt = 0) {
   });
 }
 
+// Downloaded files arrive without the exec bit on macOS/Linux, and a binary
+// that can't be executed fails at download time with a cryptic EACCES.
+function makeExecutable(p) {
+  if (IS_MAC) {
+    try { fs.chmodSync(p, 0o755); } catch { /* best effort */ }
+  }
+}
+
 async function downloadYtdlp() {
-  const dest = path.join(RESOURCES_DIR, 'yt-dlp.exe');
+  const dest = path.join(RESOURCES_DIR, 'yt-dlp' + EXE);
   if (exists(dest) && !FORCE) {
-    console.log('  ✓ yt-dlp.exe already present, skipping');
+    console.log(`  ✓ yt-dlp${EXE} already present, skipping`);
     return;
   }
   await downloadFile(YTDLP_URL, dest);
-  console.log('  ✓ yt-dlp.exe downloaded');
+  makeExecutable(dest);
+  console.log(`  ✓ yt-dlp${EXE} downloaded`);
+}
+
+async function downloadFfmpegMac() {
+  const ffmpegDest = path.join(RESOURCES_DIR, 'ffmpeg');
+  const ffprobeDest = path.join(RESOURCES_DIR, 'ffprobe');
+  if (exists(ffmpegDest) && exists(ffprobeDest) && !FORCE) {
+    console.log('  ✓ ffmpeg + ffprobe already present, skipping');
+    return;
+  }
+  console.log(`  downloading ffmpeg + ffprobe for darwin-${TARGET_ARCH}…`);
+  await downloadFile(macFfmpegUrl('ffmpeg'), ffmpegDest);
+  await downloadFile(macFfmpegUrl('ffprobe'), ffprobeDest);
+  makeExecutable(ffmpegDest);
+  makeExecutable(ffprobeDest);
+  console.log('  ✓ ffmpeg + ffprobe downloaded');
 }
 
 async function downloadFfmpeg() {
+  if (IS_MAC) return downloadFfmpegMac();
+
   const ffmpegDest = path.join(RESOURCES_DIR, 'ffmpeg.exe');
   const ffprobeDest = path.join(RESOURCES_DIR, 'ffprobe.exe');
   if (exists(ffmpegDest) && exists(ffprobeDest) && !FORCE) {
@@ -141,11 +185,11 @@ async function downloadFfmpeg() {
 }
 
 async function main() {
-  if (process.platform !== 'win32' && !process.env.CI) {
-    console.log('  ℹ Not on Windows — skipping binary download (CI/dev only on Win)');
+  if (!IS_MAC && TARGET_PLATFORM !== 'win32') {
+    console.log(`  ℹ No bundled binaries for ${TARGET_PLATFORM} — skipping`);
     return;
   }
-  console.log('▶ MediaGrab: downloading bundled binaries');
+  console.log(`▶ MediaGrab: downloading bundled binaries (${TARGET_PLATFORM}-${TARGET_ARCH})`);
   fs.mkdirSync(RESOURCES_DIR, { recursive: true });
   await downloadYtdlp();
   await downloadFfmpeg();

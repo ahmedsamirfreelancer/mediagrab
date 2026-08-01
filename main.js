@@ -24,6 +24,11 @@ try {
   autoUpdater = require('electron-updater').autoUpdater;
 } catch { /* electron-updater not installed yet; ignore until built */ }
 
+const IS_MAC = process.platform === 'darwin';
+// Bundled binaries are named yt-dlp.exe/ffmpeg.exe on Windows and
+// yt-dlp/ffmpeg (no extension) on macOS.
+const EXE = IS_MAC ? '' : '.exe';
+
 function getBinPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'bin')
@@ -44,7 +49,10 @@ function startServer() {
   // precedence over the bundled binary in resources/bin so users always run
   // the latest version once they've updated.
   const userBin = path.join(app.getPath('userData'), 'bin');
-  env.PATH = `${userBin};${getBinPath()};${env.PATH || ''}`;
+  // path.delimiter, not a hard-coded ';' — macOS separates PATH entries with ':'
+  // and a ';' there would collapse both bin dirs into one bogus entry.
+  const sep = path.delimiter;
+  env.PATH = `${userBin}${sep}${getBinPath()}${sep}${env.PATH || ''}`;
   env.MEDIAGRAB_DATA_DIR = path.join(app.getPath('userData'), 'data');
 
   serverProcess = fork(getServerPath(), [], {
@@ -130,7 +138,7 @@ async function bootLicensedApp() {
   // Re-validate against the license server in the background. If revoked,
   // the next launch will fall back to activation flow.
   licenseClient.startCron();
-  if (autoUpdater) setupAutoUpdater();
+  if (autoUpdater || IS_MAC) setupAutoUpdater();
 }
 
 /* ─── IPC handlers (used by license/activate.html) ───────────────────────── */
@@ -1280,7 +1288,56 @@ function sendUpdateStatus(status, extra) {
   } catch {}
 }
 
+/* macOS update path.
+ *
+ * Squirrel.Mac (what electron-updater drives on macOS) refuses to apply an
+ * update to an app that isn't code-signed by an Apple Developer ID, and our
+ * mac build is unsigned — calling checkForUpdates() there only produces a
+ * "Could not get code signature" error. So on macOS we do the honest thing:
+ * ask the public releases repo what the newest version is and, if it's newer,
+ * tell the user to download it (the "install" button opens the release page).
+ * The moment a Developer ID cert is added to the build, delete this and let
+ * electron-updater handle macOS like it does Windows.
+ */
+const RELEASES_API = 'https://api.github.com/repos/ahmedsamirfreelancer/mediagrab-releases/releases/latest';
+const RELEASES_PAGE = 'https://github.com/ahmedsamirfreelancer/mediagrab-releases/releases/latest';
+
+function isNewerVersion(latest, current) {
+  const a = String(latest).split('.').map((n) => parseInt(n, 10) || 0);
+  const b = String(current).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) > (b[i] || 0)) return true;
+    if ((a[i] || 0) < (b[i] || 0)) return false;
+  }
+  return false;
+}
+
+async function checkMacUpdate() {
+  sendUpdateStatus('checking');
+  try {
+    const release = await fetchJson(RELEASES_API);
+    const latest = String(release.tag_name || '').replace(/^v/, '');
+    const current = app.getVersion();
+    if (latest && isNewerVersion(latest, current)) {
+      // 'manual' = a newer build exists but the user has to install it himself.
+      sendUpdateStatus('manual', { version: latest });
+      return { supported: true, manual: true, current, latest };
+    }
+    sendUpdateStatus('uptodate');
+    return { supported: true, manual: true, current, latest };
+  } catch (e) {
+    sendUpdateStatus('error');
+    return { supported: true, manual: true, error: e.message, current: app.getVersion() };
+  }
+}
+
+function setupMacUpdateCheck() {
+  checkMacUpdate().catch(() => {});
+  setInterval(() => { checkMacUpdate().catch(() => {}); }, 6 * 60 * 60 * 1000);
+}
+
 function setupAutoUpdater() {
+  if (IS_MAC) return setupMacUpdateCheck();
   try {
     autoUpdater.autoDownload = true;          // pull the new version in the background
     autoUpdater.autoInstallOnAppQuit = true;  // and apply it when the user closes the app
@@ -1302,6 +1359,7 @@ function setupAutoUpdater() {
 
 // Manual "check for updates" button in Settings.
 ipcMain.handle('app:checkForUpdate', async () => {
+  if (IS_MAC) return checkMacUpdate();
   if (!autoUpdater) return { supported: false, current: (() => { try { return app.getVersion(); } catch { return ''; } })() };
   try {
     sendUpdateStatus('checking');
@@ -1321,6 +1379,11 @@ ipcMain.handle('app:updateState', () => ({
 
 // "Restart & install" button / banner — applies the downloaded update right now.
 ipcMain.handle('app:installUpdate', () => {
+  // On macOS there's nothing to install in place — open the release page so
+  // the user can grab the new .dmg.
+  if (IS_MAC) {
+    try { shell.openExternal(RELEASES_PAGE); return true; } catch { return false; }
+  }
   if (!autoUpdater) return false;
   try { setImmediate(() => autoUpdater.quitAndInstall()); return true; } catch { return false; }
 });
@@ -1715,11 +1778,11 @@ const https = require('https');
 const { spawnSync } = require('child_process');
 
 function getYtdlpUserPath() {
-  return path.join(app.getPath('userData'), 'bin', 'yt-dlp.exe');
+  return path.join(app.getPath('userData'), 'bin', 'yt-dlp' + EXE);
 }
 
 function getYtdlpBundledPath() {
-  return path.join(getBinPath(), 'yt-dlp.exe');
+  return path.join(getBinPath(), 'yt-dlp' + EXE);
 }
 
 function getYtdlpActivePath() {
@@ -1801,10 +1864,15 @@ ipcMain.handle('ytdlp:check', async () => {
 // Shared by the manual "update" button and the silent on-launch refresh.
 async function updateYtdlpToLatest() {
   const release = await fetchJson(YTDLP_RELEASE_API);
-  const asset = (release.assets || []).find((a) => a.name === 'yt-dlp.exe');
-  if (!asset) throw new Error('yt-dlp.exe asset not found in latest release');
+  // `yt-dlp_macos` is the universal2 (Intel + Apple Silicon) build.
+  const assetName = IS_MAC ? 'yt-dlp_macos' : 'yt-dlp.exe';
+  const asset = (release.assets || []).find((a) => a.name === assetName);
+  if (!asset) throw new Error(`${assetName} asset not found in latest release`);
   const dest = getYtdlpUserPath();
   await fetchBinary(asset.browser_download_url, dest);
+  // A fresh download has no exec bit on macOS — without this the server can
+  // only fail with EACCES when it tries to spawn it.
+  if (IS_MAC) { try { fs.chmodSync(dest, 0o755); } catch {} }
   const version = readCurrentYtdlpVersion();
   if (serverProcess) {
     try { serverProcess.kill(); } catch {}

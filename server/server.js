@@ -94,13 +94,18 @@ const io = new Server(server, {
 
 // ─── Locate yt-dlp once at startup ─────────────────────────────────────────────
 function findYtdlp() {
-  const result = spawnSync('where', ['yt-dlp'], { encoding: 'utf8' });
+  const isWin = process.platform === 'win32';
+  // `where` is Windows-only; macOS/Linux use `which`. The bundled binary is
+  // yt-dlp.exe on Windows and plain `yt-dlp` elsewhere — main.js puts both the
+  // user-updated and bundled bin dirs at the front of PATH before forking us.
+  const result = spawnSync(isWin ? 'where' : 'which', ['yt-dlp'], { encoding: 'utf8' });
   if (result.status === 0) {
-    const first = result.stdout.split(/\r?\n/).find((l) => l.trim().endsWith('.exe'));
-    if (first) return first.trim();
+    const lines = result.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const first = isWin ? lines.find((l) => l.endsWith('.exe')) : lines[0];
+    if (first) return first;
   }
   // Fallback to PATH lookup at exec time (less safe but functional)
-  return 'yt-dlp.exe';
+  return isWin ? 'yt-dlp.exe' : 'yt-dlp';
 }
 
 const YTDLP_PATH = findYtdlp();
@@ -576,10 +581,13 @@ function pushCompleted(record) {
 }
 
 // ─── Path & filename safety ────────────────────────────────────────────────────
-const FORBIDDEN_DIRS = [
-  'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)',
-  'C:\\ProgramData', path.join(os.homedir(), 'AppData'),
-];
+const FORBIDDEN_DIRS = process.platform === 'darwin'
+  ? ['/System', '/Library', '/Applications', '/usr', '/bin', '/sbin', '/private',
+     path.join(os.homedir(), 'Library')]
+  : [
+    'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)',
+    'C:\\ProgramData', path.join(os.homedir(), 'AppData'),
+  ];
 
 function validateOutputDir(dir) {
   if (!dir || typeof dir !== 'string') return DEFAULT_OUTPUT_DIR;
@@ -588,8 +596,12 @@ function validateOutputDir(dir) {
   if (cleaned.includes('..')) throw new Error('Invalid output directory (path traversal)');
   if (!path.isAbsolute(cleaned)) throw new Error('Output directory must be absolute');
   const resolved = path.resolve(cleaned);
+  // Compare with a trailing separator on BOTH sides: a bare prefix check would
+  // read "/Users/ahmed/…" as living under "/usr" and reject the user's own
+  // home folder on macOS.
+  const target = (resolved.toLowerCase() + path.sep);
   for (const forbidden of FORBIDDEN_DIRS) {
-    if (resolved.toLowerCase().startsWith(forbidden.toLowerCase())) {
+    if (target.startsWith(forbidden.toLowerCase() + path.sep)) {
       throw new Error(`Cannot write to system directory: ${forbidden}`);
     }
   }

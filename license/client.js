@@ -97,21 +97,43 @@ function readWindowsMachineGuid() {
 }
 
 /**
- * Build a stable per-machine ID. On Windows we use MachineGuid (rock solid).
- * On other platforms we fall back to hashed CPU + memory + arch.
+ * Read the macOS IOPlatformUUID — the Mac equivalent of MachineGuid. Stable
+ * for the life of the machine (it's burned into the hardware, so unlike the
+ * Windows GUID it even survives a clean reinstall).
+ */
+function readMacPlatformUuid() {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const out = execSync('ioreg -rd1 -c IOPlatformExpertDevice', {
+        encoding: 'utf8',
+        timeout: 8000,
+      });
+      const m = out.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
+      if (m) return m[1].toLowerCase();
+    } catch { /* retry */ }
+  }
+  return null;
+}
+
+/**
+ * Build a stable per-machine ID. On Windows we use MachineGuid and on macOS
+ * IOPlatformUUID (both rock solid). Anywhere else we fall back to hashed
+ * CPU + memory + arch.
  */
 function getHardwareFingerprint() {
   if (cachedFingerprint) return cachedFingerprint;
 
-  if (process.platform === 'win32') {
-    const guid = readWindowsMachineGuid();
-    if (guid) {
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    const id = process.platform === 'win32'
+      ? readWindowsMachineGuid()
+      : readMacPlatformUuid();
+    if (id) {
       // Hash so the license API never sees the raw machine GUID.
-      cachedFingerprint = crypto.createHash('sha256').update('mediagrab:' + guid).digest('hex').substring(0, 32);
+      cachedFingerprint = crypto.createHash('sha256').update('mediagrab:' + id).digest('hex').substring(0, 32);
       return cachedFingerprint;
     }
-    // MachineGuid unreadable this boot. Do NOT invent a fresh CPU-hash — that
-    // would differ from the GUID-based id we activated with and log the user
+    // Machine id unreadable this boot. Do NOT invent a fresh CPU-hash — that
+    // would differ from the id we activated with and log the user
     // out. Reuse the last-known fingerprint persisted at activation instead.
     if (cache && cache.fingerprint) {
       cachedFingerprint = cache.fingerprint;

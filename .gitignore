@@ -16,6 +16,10 @@ MediaGrab-win32-x64/
 resources/yt-dlp.exe
 resources/ffmpeg.exe
 resources/ffprobe.exe
+# macOS names (same binaries, no extension)
+resources/yt-dlp
+resources/ffmpeg
+resources/ffprobe
 
 # Runtime data
 data/
