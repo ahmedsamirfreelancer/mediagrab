@@ -1992,6 +1992,18 @@ app.whenReady().then(async () => {
     await bootLicensedApp();
     licensed = true;
   } else {
+    // Not valid locally — but the cron only runs once we're already booted, so
+    // a machine that fell out of the grace window had NO way back except the
+    // user retyping their key. Give the server one chance to heal it first
+    // (expired token, drifted fingerprint, an outage that outlasted grace).
+    // Only worth a round trip if we still have a stored key.
+    if (await licenseClient.revalidateStoredKey()) {
+      await bootLicensedApp();
+      licensed = true;
+    }
+  }
+
+  if (!licensed) {
     // Owner builds get a baked-in license key and skip the activation UI.
     const autoActivated = await licenseClient.tryAutoActivateWithOwnerKey();
     if (autoActivated) {

@@ -343,6 +343,36 @@ async function validate() {
 }
 
 /**
+ * Last-chance heal before we show the activation screen.
+ *
+ * The daily cron only starts AFTER the app boots licensed, so a machine that
+ * slipped out of the grace window had no path back at all — the user had to
+ * retype a key they already own, which is exactly what "it keeps asking for
+ * another license" means. One server round trip fixes the common cases: an
+ * expired token, a fingerprint the server will happily rebind (mediagrab is
+ * lifetime), or an outage that simply lasted longer than the grace window.
+ *
+ * Returns true only if the server actually vouched for the license. A failure
+ * here changes nothing — validate() already refuses to wipe a license on
+ * anything short of an explicit revoked/expired/invalid_key verdict.
+ */
+async function revalidateStoredKey() {
+  if (!cache.key) return false;
+  try {
+    const res = await validate();
+    if (!res.valid) return false;
+    // validate() passed on the server's word — trust it over the stale local
+    // status that sent us down this path.
+    cache.status = 'active';
+    cache.lastValid = Date.now();
+    writeStore();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Try to silently activate using the owner key baked in at build time.
  * Returns true if activation succeeded (caller can skip the activation UI).
  * No-op if no owner key was provided at build time, or if a license is
@@ -411,4 +441,5 @@ module.exports = {
   startCron,
   getHardwareFingerprint,
   tryAutoActivateWithOwnerKey,
+  revalidateStoredKey,
 };
