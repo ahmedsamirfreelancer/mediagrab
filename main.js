@@ -1912,9 +1912,11 @@ function maybeAutoUpdateYtdlp() {
   } catch {}
 }
 
-/* ─── Error reporting to arqami.app ──────────────────────────────────────── */
+/* ─── Error reporting ────────────────────────────────────────────────────── */
 
-const ERROR_ENDPOINT = process.env.MEDIAGRAB_ERROR_ENDPOINT || 'https://arqami.app/api/mediagrab/error';
+// Same move as the license API: arqami.app is the SaaS platform now and answers
+// 404 here, so every crash report since 2026-08-02 went nowhere.
+const ERROR_ENDPOINT = process.env.MEDIAGRAB_ERROR_ENDPOINT || 'https://license.ahmedsamir.net/api/mediagrab/error';
 const APP_VERSION_FOR_ERRORS = require('./package.json').version;
 
 function reportError(err, context = {}) {

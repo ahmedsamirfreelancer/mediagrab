@@ -1,7 +1,7 @@
 /**
  * MediaGrab License Client
  *
- * Talks to arqami.app license API and persists state in userData/license.json.
+ * Talks to the license API and persists state in userData/license.json.
  *
  * - Hardware fingerprint is the "domain" field on the server side
  *   (license_products.type='desktop'). One key = one machine.
@@ -18,7 +18,10 @@ const crypto = require('crypto');
 const https = require('https');
 const { execSync } = require('child_process');
 
-const API_BASE = process.env.MEDIAGRAB_LICENSE_API || 'https://arqami.app/api/license';
+// Moved off arqami.app on 2026-08-02 (that domain is the SaaS platform now).
+// The old host still answers — it proxies here — but point straight at the
+// real one so we never depend on that compatibility layer.
+const API_BASE = process.env.MEDIAGRAB_LICENSE_API || 'https://license.ahmedsamir.net/api/license';
 const PRODUCT_SLUG = 'mediagrab';
 const APP_VERSION = '1.0.0';
 
@@ -175,7 +178,18 @@ function verifyToken(token) {
   }
 }
 
-function postJson(url, body) {
+/**
+ * POST JSON, following redirects.
+ *
+ * `https.request` does NOT follow redirects on its own. When the license API
+ * moved and the old host started answering 3xx, every installed copy read the
+ * redirect's HTML body, failed to parse it, and treated that as "activation
+ * failed" / "validation glitch" — the whole fleet was locked out of activating.
+ * 307/308 preserve the method and body, so re-issuing the same POST at the
+ * Location is correct; 301/302/303 are followed the same way here because the
+ * only thing behind this URL is our own license API.
+ */
+function postJson(url, body, redirectsLeft = 3) {
   return new Promise((resolve, reject) => {
     let parsed;
     try { parsed = new URL(url); } catch { return reject(new Error('Invalid URL')); }
@@ -192,6 +206,13 @@ function postJson(url, body) {
         'User-Agent': `MediaGrab/${APP_VERSION}`,
       },
     }, (res) => {
+      const status = res.statusCode || 0;
+      const location = res.headers.location;
+      if (status >= 300 && status < 400 && location && redirectsLeft > 0) {
+        res.resume(); // drain, we don't need the redirect page
+        const next = new URL(location, url).toString();
+        return resolve(postJson(next, body, redirectsLeft - 1));
+      }
       let buf = '';
       res.on('data', (c) => (buf += c));
       res.on('end', () => {
