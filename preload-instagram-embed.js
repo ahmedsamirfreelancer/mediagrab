@@ -548,6 +548,46 @@ const { ipcRenderer } = require('electron');
   // long name"). This overlay shows a spinner until the first tiles appear, and
   // if the query genuinely returns nothing after a while it says so clearly.
   const mgSearchStart = Date.now();
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  // إنستجرام مابيرجّعش نتايج لجملة طويلة/محدّدة. بنقصّرها بالتدريج:
+  // ٣ كلمات → كلمتين → أطول كلمة واحدة. الأصل بيتخزّن في sessionStorage عشان
+  // كل محاولة تتقاس على البحث الأصلي مش على اللي قبلها، ومفيش لفّة لا نهائية.
+  const MG_ORIG_KEY = 'mg_ig_orig_q';
+  const MG_STEP_KEY = 'mg_ig_shrink_step';
+  function currentQ() {
+    try { return new URLSearchParams(location.search).get('q') || ''; } catch { return ''; }
+  }
+  function shorterQuery() {
+    const cur = currentQ().trim();
+    if (!cur) return null;
+    let orig = '';
+    try { orig = sessionStorage.getItem(MG_ORIG_KEY) || ''; } catch {}
+    // بحث جديد (مش تكملة سلسلة) → نبدأ العدّاد من أول
+    if (!orig || (orig !== cur && (parseInt((() => { try { return sessionStorage.getItem(MG_STEP_KEY) } catch { return '0' } })() || '0', 10) === 0))) {
+      orig = cur;
+      try { sessionStorage.setItem(MG_ORIG_KEY, orig); sessionStorage.setItem(MG_STEP_KEY, '0'); } catch {}
+    }
+    let step = 0;
+    try { step = parseInt(sessionStorage.getItem(MG_STEP_KEY) || '0', 10); } catch {}
+
+    const tokens = orig.split(/\s+/).map((t) => t.replace(/[«»"'،,.؟?!]/g, '')).filter((t) => t.length >= 2);
+    const candidates = [];
+    if (tokens.length > 3) candidates.push(tokens.slice(0, 3).join(' '));
+    if (tokens.length > 2) candidates.push(tokens.slice(0, 2).join(' '));
+    // آخر محاولة = أول كلمة، مش أطول كلمة: في العربي أول كلمة غالبًا اسم المنتج
+    // («سجادة صلاة قطن مصري بتصميم تركي» → «سجادة»)، وأطول كلمة بتطلع حشو («بتصميم»).
+    if (tokens.length > 1 && tokens[0].length >= 3) candidates.push(tokens[0]);
+    // شيل أي مرشّح مش مختلف فعلاً عن اللي إحنا فيه
+    while (step < candidates.length && candidates[step].trim() === cur) step++;
+    if (step >= candidates.length) return null;
+    try { sessionStorage.setItem(MG_STEP_KEY, String(step + 1)); } catch {}
+    return candidates[step];
+  }
+
   function gridTileCount() {
     let n = 0;
     for (const a of document.querySelectorAll('a[href*="/reel/"], a[href*="/tv/"], a[href*="/p/"]')) {
@@ -591,12 +631,20 @@ const { ipcRenderer } = require('electron');
     const o = ov || ensureOverlay();
     if (!o || o.dataset.dismissed === '1') return;
     o.style.display = 'flex';
-    // After ~13s with still nothing, call it a genuine empty result.
+    // After ~13s with still nothing: إنستجرام بيرجّع صفر للجملة الطويلة/المحدّدة،
+    // وكان بيقول للمستخدم «جرّب كلمة أقصر» ويسيبه يعيد بإيده. دلوقتي بنقصّر
+    // البحث إحنا ونعيد المحاولة تلقائيًا (٣ محاولات متدرّجة) وبنقول له بنجرّب إيه.
     if (elapsed > 13000) {
+      const next = shorterQuery();
       const spin = document.getElementById('mg-load-spin');
       const msg = document.getElementById('mg-load-msg');
+      if (next) {
+        if (msg) msg.innerHTML = '🔍 مفيش نتايج للجملة كاملة — بنجرّب <b>«' + escapeHtml(next) + '»</b>…';
+        location.replace('/explore/search/keyword/?q=' + encodeURIComponent(next));
+        return;
+      }
       if (spin) spin.style.display = 'none';
-      if (msg) msg.innerHTML = '🔍 إنستجرام مرجّعش أي نتايج للبحث ده.<br><span style="font-size:13px;font-weight:400;opacity:.85;">جرّب كلمة أقصر أو أعم (مثلاً كلمة-كلمتين بدل الجملة كاملة).</span>';
+      if (msg) msg.innerHTML = '🔍 إنستجرام مرجّعش أي نتايج للبحث ده — حتى بعد ما قصّرناه.<br><span style="font-size:13px;font-weight:400;opacity:.85;">جرّب كلمة تانية، أو ابحث باسم حساب بدل كلمة.</span>';
     }
   }
 
