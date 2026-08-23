@@ -101,7 +101,7 @@
       }
     },
     "dmg": {
-      "title": "MediaGrab ${version}",
+      "title": "MediaGrab ${version} ${arch}",
       "contents": [
         {
           "x": 130,
