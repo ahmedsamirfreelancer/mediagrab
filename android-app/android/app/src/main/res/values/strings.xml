@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MediaGrab</string>
+    <string name="title_activity_main">MediaGrab</string>
+    <string name="package_name">com.arqami.mediagrab</string>
+    <string name="custom_url_scheme">com.arqami.mediagrab</string>
+</resources>

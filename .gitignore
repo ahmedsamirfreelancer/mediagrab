@@ -32,3 +32,14 @@ Thumbs.db
 *.log
 .vscode/
 .idea/
+
+# Android app: generated / machine-specific / secret
+android-app/www/
+android-app/node_modules/
+android-app/dist-apk/
+android-app/android/build/
+android-app/android/.gradle/
+android-app/android/app/build/
+android-app/android/capacitor-cordova-android-plugins/build/
+android-app/android/local.properties
+android-app/android/keystore.properties

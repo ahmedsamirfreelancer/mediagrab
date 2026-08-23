@@ -1,0 +1,16 @@
+# Node
+node_modules/
+
+# Capacitor / Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+android/local.properties
+*.apk
+*.aab
+*.keystore
+.DS_Store
+
+# Keep signing config out of the repo (injected in CI)
+key.properties

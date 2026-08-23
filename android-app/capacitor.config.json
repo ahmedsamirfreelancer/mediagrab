@@ -1,0 +1,8 @@
+{
+  "appId": "com.arqami.mediagrab",
+  "appName": "MediaGrab",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  }
+}
