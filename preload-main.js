@@ -1,6 +1,6 @@
 /**
  * Preload for the main MediaGrab window (the one that loads http://127.0.0.1:3456).
- * Exposes Electron-side functionality (Instagram login, license info) to the
+ * Exposes Electron-side functionality (Instagram/TikTok login, updates) to the
  * web UI through window.electronAPI.
  */
 
@@ -66,11 +66,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateState: () => ipcRenderer.invoke('app:updateState'),
     installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
     onUpdateStatus: (cb) => ipcRenderer.on('app-update:status', (_e, data) => cb(data)),
-  },
-  // License info (read-only; activation happens at the gate before this window opens)
-  license: {
-    getStatus: () => ipcRenderer.invoke('license:getStatus'),
-    deactivate: () => ipcRenderer.invoke('license:deactivate'),
   },
   // yt-dlp updater
   ytdlp: {

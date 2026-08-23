@@ -6,17 +6,23 @@ const { fork } = require('child_process');
 // Force the same userData folder in dev (`npm start`) and packaged builds.
 // Without this, dev runs land in %APPDATA%/mediagrab (lowercase name from
 // package.json) while the installer uses %APPDATA%/MediaGrab (productName),
-// so dev mode wouldn't see the license/cookies the user already activated.
+// so dev mode wouldn't see the cookies/settings the installed copy already has.
 app.setName('MediaGrab');
 
 let serverProcess = null;
 let mainWin = null;
-let activationWin = null;
 
 const SERVER_PORT = 3456;
 
-// License client lives outside asar (file IO + http) so require it relative.
-const licenseClient = require('./license/client');
+// MediaGrab is free: no serial, no activation screen, no license server.
+// The one thing kept from that era is a stable per-machine id, used only to
+// group crash reports — it is a hash of hardware attributes, no user data.
+function machineId() {
+  const os = require('os');
+  const crypto = require('crypto');
+  const raw = [process.platform, os.arch(), os.cpus()[0] && os.cpus()[0].model, os.totalmem()].join('|');
+  return crypto.createHash('sha256').update('mediagrab:' + raw).digest('hex').slice(0, 32);
+}
 
 // Auto-updater is optional — keep MediaGrab functional if user hasn't installed it.
 let autoUpdater = null;
@@ -86,24 +92,6 @@ async function waitForServer(retries = 40) {
   return false;
 }
 
-function createActivationWindow() {
-  activationWin = new BrowserWindow({
-    width: 520,
-    height: 640,
-    title: 'MediaGrab — تفعيل',
-    backgroundColor: '#1e1b4b',
-    resizable: false,
-    autoHideMenuBar: true,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, 'license', 'preload.js'),
-    },
-  });
-  activationWin.loadFile(path.join(__dirname, 'license', 'activate.html'));
-  activationWin.on('closed', () => { activationWin = null; });
-}
-
 function createMainWindow() {
   mainWin = new BrowserWindow({
     width: 1400,
@@ -127,7 +115,7 @@ function createMainWindow() {
   mainWin.on('closed', () => { mainWin = null; });
 }
 
-async function bootLicensedApp() {
+async function bootApp() {
   startServer();
   await waitForServer();
   createMainWindow();
@@ -135,35 +123,8 @@ async function bootLicensedApp() {
   // embedded search shows the same results as their logged-in browser without
   // any manual "login" click. Non-blocking — never delays app boot.
   ensureTiktokLoggedInAuto();
-  // Re-validate against the license server in the background. If revoked,
-  // the next launch will fall back to activation flow.
-  licenseClient.startCron();
   if (autoUpdater || IS_MAC) setupAutoUpdater();
 }
-
-/* ─── IPC handlers (used by license/activate.html) ───────────────────────── */
-
-ipcMain.handle('license:activate', async (_evt, key) => {
-  const result = await licenseClient.activate(key);
-  if (result.success) {
-    // Boot the app and close the activation window.
-    setTimeout(async () => {
-      await bootLicensedApp();
-      if (activationWin) {
-        try { activationWin.close(); } catch {}
-      }
-    }, 600);
-  }
-  return result;
-});
-
-ipcMain.handle('license:deactivate', async () => licenseClient.deactivate());
-ipcMain.handle('license:getStatus', async () => licenseClient.getStatus());
-ipcMain.handle('license:getFingerprint', async () => licenseClient.getHardwareFingerprint());
-ipcMain.handle('license:quit', async () => { app.quit(); });
-ipcMain.handle('license:openExternal', async (_evt, url) => {
-  if (typeof url === 'string' && /^https?:\/\//.test(url)) shell.openExternal(url);
-});
 
 /* ─── Shell helpers (opening downloaded files/folders) ───────────────────── */
 
@@ -337,7 +298,6 @@ ipcMain.handle('image:reverseSearch', async (_evt, bytes, mime) => {
 /* TikTok user URLs now go through yt-dlp in server.js — no Electron-side
  * scraper/bridge/login needed. yt-dlp uses TikTok's real pagination API and
  * pulls full profiles in one pass without authentication. */
-
 
 /* ─── Instagram in-app login ─────────────────────────────────────────────── */
 
@@ -1872,7 +1832,15 @@ async function updateYtdlpToLatest() {
   await fetchBinary(asset.browser_download_url, dest);
   // A fresh download has no exec bit on macOS — without this the server can
   // only fail with EACCES when it tries to spawn it.
-  if (IS_MAC) { try { fs.chmodSync(dest, 0o755); } catch {} }
+  if (IS_MAC) {
+    try { fs.chmodSync(dest, 0o755); } catch {}
+    // Apple Silicon kills any Mach-O that carries no signature at all
+    // ("Killed: 9") — chmod alone is not enough for a binary we downloaded
+    // ourselves. An ad-hoc signature costs nothing and makes it runnable.
+    try { spawnSync('codesign', ['--force', '--sign', '-', dest], { timeout: 20000 }); } catch {}
+    // Belt and braces: strip quarantine in case the file ever picks it up.
+    try { spawnSync('xattr', ['-d', 'com.apple.quarantine', dest], { timeout: 5000 }); } catch {}
+  }
   const version = readCurrentYtdlpVersion();
   if (serverProcess) {
     try { serverProcess.kill(); } catch {}
@@ -1914,20 +1882,19 @@ function maybeAutoUpdateYtdlp() {
 
 /* ─── Error reporting ────────────────────────────────────────────────────── */
 
-// Same move as the license API: arqami.app is the SaaS platform now and answers
+// arqami.app is the SaaS platform now and answers
 // 404 here, so every crash report since 2026-08-02 went nowhere.
 const ERROR_ENDPOINT = process.env.MEDIAGRAB_ERROR_ENDPOINT || 'https://license.ahmedsamir.net/api/mediagrab/error';
 const APP_VERSION_FOR_ERRORS = require('./package.json').version;
 
 function reportError(err, context = {}) {
   try {
-    const status = licenseClient.getStatus?.() || {};
+
     const payload = JSON.stringify({
       message: String(err?.message || err || 'unknown'),
       stack: String(err?.stack || ''),
       version: APP_VERSION_FOR_ERRORS,
-      machineId: licenseClient.getHardwareFingerprint?.() || '',
-      licenseKey: status.keyMasked || '',
+      machineId: machineId(),
       context: typeof context === 'string' ? context : JSON.stringify(context),
     });
     const u = new URL(ERROR_ENDPOINT);
@@ -1960,7 +1927,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    const win = mainWin || activationWin;
+    const win = mainWin;
     if (win) {
       if (win.isMinimized()) win.restore();
       win.focus();
@@ -1968,60 +1935,72 @@ if (!gotLock) {
   });
 }
 
+/* ─── macOS menu ─────────────────────────────────────────────────────────── */
+
+// Minimal roles-only menu. Electron on macOS derives the standard keyboard
+// shortcuts from the menu, so this is what makes Cmd+V / Cmd+Q / Cmd+W work at
+// all — it is not decoration.
+function buildMacMenu() {
+  return Menu.buildFromTemplate([
+    { role: 'appMenu' },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'togglefullscreen' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { role: 'resetZoom' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ]);
+}
+
 /* ─── App lifecycle ──────────────────────────────────────────────────────── */
 
 app.whenReady().then(async () => {
-  Menu.setApplicationMenu(null);
-
-  // Init license client with userData path.
-  licenseClient.init(app.getPath('userData'));
+  // macOS: an app with NO menu bar loses every standard accelerator with it —
+  // Cmd+V (pasting a link, the app's main input), Cmd+A, Cmd+W, and Cmd+Q. So
+  // on mac we install the minimal roles menu instead of nothing. Windows keeps
+  // its menu hidden (autoHideMenuBar covers it there).
+  Menu.setApplicationMenu(IS_MAC ? buildMacMenu() : null);
 
   // Auto-start with Windows (production builds only).
   if (app.isPackaged) {
     try {
-      app.setLoginItemSettings({
-        openAtLogin: true,
-        openAsHidden: false,
-        path: process.execPath,
-      });
+      app.setLoginItemSettings(IS_MAC
+        // macOS: omit `path`. process.execPath is the executable INSIDE the
+        // bundle; registering that launches a bare process instead of the app.
+        ? { openAtLogin: true, openAsHidden: false }
+        : { openAtLogin: true, openAsHidden: false, path: process.execPath });
     } catch {}
   }
 
-  let licensed = false;
-  if (licenseClient.isValid()) {
-    await bootLicensedApp();
-    licensed = true;
-  } else {
-    // Not valid locally — but the cron only runs once we're already booted, so
-    // a machine that fell out of the grace window had NO way back except the
-    // user retyping their key. Give the server one chance to heal it first
-    // (expired token, drifted fingerprint, an outage that outlasted grace).
-    // Only worth a round trip if we still have a stored key.
-    if (await licenseClient.revalidateStoredKey()) {
-      await bootLicensedApp();
-      licensed = true;
-    }
-  }
-
-  if (!licensed) {
-    // Owner builds get a baked-in license key and skip the activation UI.
-    const autoActivated = await licenseClient.tryAutoActivateWithOwnerKey();
-    if (autoActivated) {
-      await bootLicensedApp();
-      licensed = true;
-    } else {
-      createActivationWindow();
-    }
-  }
+  // Free build: nothing to check, nothing to activate — boot straight in.
+  await bootApp();
 
   // Keep yt-dlp fresh in the background (once/day) so downloads keep working
   // after sites change. Delayed so it never competes with first-paint.
-  if (licensed) setTimeout(maybeAutoUpdateYtdlp, 8000);
+  setTimeout(maybeAutoUpdateYtdlp, 8000);
 });
 
 app.on('window-all-closed', () => {
+  // macOS convention: the app stays alive after its last window closes. We
+  // also keep the server up — killing it here (as we used to) left the app a
+  // zombie: no window, no way to get one back, only Force Quit.
+  if (IS_MAC) return;
   if (serverProcess) try { serverProcess.kill(); } catch {}
-  if (process.platform !== 'darwin') app.quit();
+  app.quit();
+});
+
+// Dock icon click with no windows open → give the window back.
+app.on('activate', async () => {
+  if (BrowserWindow.getAllWindows().length > 0) return;
+  startServer();
+  await waitForServer();
+  createMainWindow();
 });
 
 app.on('before-quit', () => {

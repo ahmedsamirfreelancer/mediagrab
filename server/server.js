@@ -2614,7 +2614,10 @@ app.post('/api/open-folder', (req, res) => {
         : `explorer.exe "${target}"`;
       spawn(cmd, { shell: true, detached: true, stdio: 'ignore', windowsHide: true }).unref();
     } else if (process.platform === 'darwin') {
-      spawn('open', [folder], { detached: true, stdio: 'ignore' }).unref();
+      // -R reveals and selects the file in Finder — the mac equivalent of
+      // explorer /select above. Without a file we just open the folder.
+      const args = fileExists ? ['-R', filePath] : [folder];
+      spawn('open', args, { detached: true, stdio: 'ignore' }).unref();
     } else {
       spawn('xdg-open', [folder], { detached: true, stdio: 'ignore' }).unref();
     }
@@ -2622,6 +2625,19 @@ app.post('/api/open-folder', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /api/env — what OS are we on, and where do files go by default.
+// The UI used to hard-code Windows paths as its fallbacks, which made every
+// "download to the default folder" action fail on macOS (an absolute Windows
+// path isn't absolute on POSIX, so validateOutputDir rejected it outright).
+app.get('/api/env', (req, res) => {
+  res.json({
+    platform: process.platform,
+    sep: path.sep,
+    home: os.homedir(),
+    defaultOutputDir: DEFAULT_OUTPUT_DIR,
+  });
 });
 
 // GET /api/disk-space?dir=path — return free/total bytes for the volume

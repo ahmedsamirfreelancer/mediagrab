@@ -27,6 +27,9 @@
     },
     context: null, // { name, type: 'channel' | 'search' | 'single' }
     downloadedIds: { tiktok: new Set(), youtube: new Set(), instagram: new Set(), facebook: new Set() },
+    // Filled from /api/env on boot. Defaults are only what we assume before
+    // that first response lands.
+    env: { platform: 'win32', sep: '\\', home: '', defaultOutputDir: '' },
     settings: {
       outputDir: '',
       quality: 'best',
@@ -548,7 +551,7 @@
       // Instagram keyword search: open the REAL instagram.com search in a live
       // window (mobile UA so Reels show) with a download button on every reel.
       if (state.platform === 'instagram' && payload.mode === 'hashtag' && window.electronAPI?.instagram?.openSearchWindow) {
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
         window.electronAPI.instagram.openSearchWindow(payload.query, base);
         toast('فتحنا Instagram — دوس «تحميل» على أي ريل', 'info', 5000);
         return;
@@ -557,7 +560,7 @@
       // Facebook keyword search: open Facebook's live video search in a window
       // (mobile UA) with a download button on every video.
       if (state.platform === 'facebook' && payload.mode === 'hashtag' && window.electronAPI?.facebook?.openSearchWindow) {
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
         window.electronAPI.facebook.openSearchWindow(payload.query, base);
         toast('فتحنا Facebook — دوس «تحميل» على أي فيديو', 'info', 5000);
         return;
@@ -567,7 +570,7 @@
       // buttons on every video — exact same results as the site, and nothing
       // gets pulled into the in-app grid.
       if (state.platform === 'tiktok' && window.electronAPI?.tiktok?.openSearchWindow) {
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
         window.electronAPI.tiktok.openSearchWindow(payload.query, base);
         toast('فتحنا تيك توك — دوس «تحميل» على أي فيديو', 'info', 5000);
         return;
@@ -576,7 +579,7 @@
       // Pinterest: open the REAL pinterest.com pins search in a window with a
       // download button on every pin (images + videos).
       if (state.platform === 'pinterest' && window.electronAPI?.pinterest?.openSearchWindow) {
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
         window.electronAPI.pinterest.openSearchWindow(payload.query, base);
         toast('فتحنا Pinterest — دوس «تحميل» على أي صورة/فيديو', 'info', 5000);
         return;
@@ -1153,9 +1156,10 @@
       dom.subfolderInput.dataset.auto = '1';
     }
     if (dom.folderPath) {
-      const base = state.settings.outputDir || 'C:\\Users\\ahmed\\Downloads\\MediaGrab';
+      const base = state.settings.outputDir || state.env.defaultOutputDir || '';
       const sub = dom.subfolderInput.value.trim();
-      dom.folderPath.textContent = sub ? `${base}\\${sub}\\` : `${base}\\`;
+      const sep = state.env.sep || '\\';
+      dom.folderPath.textContent = sub ? `${base}${sep}${sub}${sep}` : `${base}${sep}`;
     }
   }
 
@@ -2371,31 +2375,7 @@
     } catch (e) { /* ignore */ }
   }
 
-  // ─── License & yt-dlp settings sections (Electron-only) ────
-  async function refreshLicenseSection() {
-    if (!window.electronAPI?.license) return;
-    document.getElementById('license-section').style.display = '';
-    try {
-      const s = await window.electronAPI.license.getStatus();
-      const statusMap = {
-        active: { text: 'مفعّل ✓', color: '#22c55e' },
-        revoked: { text: 'ملغى', color: '#dc2626' },
-        expired: { text: 'منتهي', color: '#f59e0b' },
-        invalid: { text: 'غير صالح', color: '#dc2626' },
-        inactive: { text: 'غير مفعّل', color: '#64748b' },
-      };
-      const m = statusMap[s.status] || statusMap.inactive;
-      const el = document.getElementById('license-status-text');
-      if (el) { el.textContent = m.text; el.style.color = m.color; }
-      const keyEl = document.getElementById('license-key-masked');
-      if (keyEl) keyEl.textContent = s.keyMasked || '—';
-      const expEl = document.getElementById('license-expires');
-      if (expEl) expEl.textContent = s.expiresAt ? new Date(s.expiresAt).toLocaleDateString('ar-EG') : 'بدون انتهاء';
-      const machineEl = document.getElementById('license-machine');
-      if (machineEl) machineEl.textContent = s.fingerprint || '—';
-    } catch (e) { /* ignore */ }
-  }
-
+  // ─── yt-dlp settings section (Electron-only) ────
   async function refreshYtdlpSection() {
     if (!window.electronAPI?.ytdlp) return;
     document.getElementById('ytdlp-section').style.display = '';
@@ -2410,18 +2390,8 @@
     } catch (e) { /* ignore */ }
   }
 
-  function bindLicenseAndYtdlpButtons() {
+  function bindYtdlpButtons() {
     if (!window.electronAPI) return;
-
-    const deactivateBtn = document.getElementById('license-deactivate-btn');
-    if (deactivateBtn) {
-      deactivateBtn.addEventListener('click', async () => {
-        if (!confirm('إلغاء التفعيل من الجهاز ده؟ هتحتاج تستخدم نفس المفتاح على الجهاز الجديد.')) return;
-        await window.electronAPI.license.deactivate();
-        toast('تم إلغاء التفعيل. التطبيق هيقفل.', 'info');
-        setTimeout(() => window.close(), 1500);
-      });
-    }
 
     const checkBtn = document.getElementById('ytdlp-check-btn');
     if (checkBtn) {
@@ -2692,7 +2662,15 @@
   }
 
   // ─── Batch download (paste many links → one folder) ──────────────────
-  const BATCH_DEFAULT_DIR = 'E:\\منتجات التست';
+  // Windows keeps the folder this workflow has always used. Anywhere else
+  // that string is not even a valid absolute path, so the server rejected it
+  // and every embed/batch download failed — fall back to whatever the server
+  // reports as its own default download folder (~/Downloads/MediaGrab on mac).
+  const BATCH_DEFAULT_DIR_WIN = 'E:\\منتجات التست';
+  function batchDefaultDir() {
+    if (state.env.platform === 'win32') return BATCH_DEFAULT_DIR_WIN;
+    return state.env.defaultOutputDir || '';
+  }
 
   function parseBatchLinks(text) {
     return (text || '').split(/[\s,;\n]+/).map((s) => s.trim()).filter(isValidUrl);
@@ -2719,7 +2697,7 @@
       if (folderEl && !folderEl.value.trim()) {
         let last = '';
         try { last = localStorage.getItem('mediagrab_batch_dir') || ''; } catch {}
-        folderEl.value = last || BATCH_DEFAULT_DIR;
+        folderEl.value = last || batchDefaultDir();
       }
       updateCount();
       modal.classList.remove('hidden');
@@ -2746,7 +2724,7 @@
     if (dlBtn) dlBtn.addEventListener('click', async () => {
       const urls = parseBatchLinks(linksEl?.value);
       if (!urls.length) return toast('مفيش روابط صالحة. الصق روابط الأول', 'warning');
-      const dir = (folderEl?.value || '').trim() || BATCH_DEFAULT_DIR;
+      const dir = (folderEl?.value || '').trim() || batchDefaultDir();
       try { localStorage.setItem('mediagrab_batch_dir', dir); } catch {}
 
       // Subfolder: use the typed product name, or auto-number (1, 2, 3…) when blank.
@@ -2761,7 +2739,7 @@
       }
 
       const items = urls.map((u) => ({ id: undefined, url: u, title: u, platform: detectPlatform(u) || state.platform }));
-      toast(`تحميل ${urls.length} رابط في ${sub ? dir + '\\' + sub : dir}`, 'info');
+      toast(`تحميل ${urls.length} رابط في ${sub ? dir + (state.env.sep || '\\') + sub : dir}`, 'info');
       startBatchDownload(items, { outputDir: dir, subfolder: sub });
       close();
       if (subfolderEl) subfolderEl.value = '';
@@ -2785,7 +2763,7 @@
         if (!data) return;
         // Use the Output Directory from Settings, then a subfolder named after
         // the search (so each product's videos group in their own folder).
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
         const sub = (data.folder || '').trim();
         // Accept a single url OR an array — sending "all/selected" as ONE batch
         // makes it a single cancellable job (Stop cancels them all reliably).
@@ -2804,7 +2782,7 @@
     if (window.electronAPI?.instagram?.onEmbedDownload) {
       window.electronAPI.instagram.onEmbedDownload((data) => {
         if (!data) return;
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
         const sub = (data.folder || '').trim();
         // New payload shape carries a kind ('video'|'photo') per item; fall back
         // to the old url/urls shape (all treated as video) for compatibility.
@@ -2830,7 +2808,7 @@
     if (window.electronAPI?.facebook?.onEmbedDownload) {
       window.electronAPI.facebook.onEmbedDownload((data) => {
         if (!data) return;
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
         const sub = (data.folder || '').trim();
         const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
         if (!urls.length) return;
@@ -2846,7 +2824,7 @@
     if (window.electronAPI?.pinterest?.onEmbedDownload) {
       window.electronAPI.pinterest.onEmbedDownload((data) => {
         if (!data) return;
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
         const sub = (data.folder || '').trim();
         const urls = Array.isArray(data.urls) ? data.urls : (data.url ? [data.url] : []);
         if (!urls.length) return;
@@ -2862,7 +2840,7 @@
     if (window.electronAPI?.facebook?.onAdLibDownload) {
       window.electronAPI.facebook.onAdLibDownload((data) => {
         if (!data || !Array.isArray(data.items) || !data.items.length) return;
-        const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+        const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
         const sub = (data.folder || '').trim();
         const items = data.items
           .filter((it) => it && it.downloadUrl)
@@ -3428,7 +3406,6 @@
 
     dom.settingsBtn.addEventListener('click', () => {
       applySettingsToForm();
-      refreshLicenseSection();
       refreshYtdlpSection();
       refreshAppUpdateSection();
       dom.settingsModal.classList.remove('hidden');
@@ -3615,7 +3592,7 @@
         toast('مكتبة الإعلانات متاحة في تطبيق سطح المكتب بس', 'warning');
         return;
       }
-      const base = (state.settings.outputDir || '').trim() || BATCH_DEFAULT_DIR;
+      const base = (state.settings.outputDir || '').trim() || batchDefaultDir();
       window.electronAPI.facebook.openAdLibrary({
         query:        (document.getElementById('adlib-query')?.value || '').trim(),
         country:       document.getElementById('adlib-country')?.value || 'EG',
@@ -3642,8 +3619,26 @@
     }
   }
 
+  // Ask the server what OS it's running on before anything renders a path or
+  // picks a default folder.
+  async function loadEnv() {
+    try {
+      const env = await apiCall('/env', null, 'GET');
+      if (env && env.platform) Object.assign(state.env, env);
+    } catch { /* keep the defaults */ }
+    // Placeholders are examples, and a Windows example on a Mac is a wrong hint.
+    const batchFolder = document.getElementById('batch-folder');
+    if (batchFolder) batchFolder.placeholder = batchDefaultDir();
+    const cookiesFile = document.getElementById('cookies-file');
+    if (cookiesFile && state.env.home) {
+      cookiesFile.placeholder = 'مثال: ' + state.env.home + (state.env.sep || '\\') + 'cookies.txt';
+    }
+    updateFolderUI();
+  }
+
   function init() {
     loadSettings();
+    loadEnv();
     loadFiltersPreference();
     if (dom.sortBy)         dom.sortBy.value         = state.filters.sortBy   || 'views_desc';
     if (dom.filterDuration) dom.filterDuration.value = state.filters.duration || 'all';
@@ -3672,7 +3667,7 @@
     bindTiktokEmbed();
     bindBatchModal();
     bindCookieImportButtons();
-    bindLicenseAndYtdlpButtons();
+    bindYtdlpButtons();
     bindAppUpdateButtons();
     switchPlatform('tiktok');
 

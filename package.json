@@ -1,10 +1,10 @@
 {
   "name": "mediagrab",
-  "version": "1.0.36",
+  "version": "1.0.37",
   "description": "MediaGrab — Multi-platform video downloader",
   "main": "main.js",
   "author": "Ahmed",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "postinstall": "node scripts/download-binaries.js && electron-builder install-app-deps || true",
     "binaries": "node scripts/download-binaries.js",
@@ -42,7 +42,6 @@
       "preload-facebook-embed.js",
       "preload-fb-adlibrary.js",
       "preload-pinterest-embed.js",
-      "license/**/*",
       "server/**/*",
       "node_modules/**/*",
       "package.json"
