@@ -33,11 +33,19 @@ const EXE = IS_MAC ? '' : '.exe';
 const YTDLP_ASSET = IS_MAC ? 'yt-dlp_macos' : 'yt-dlp.exe';
 const YTDLP_URL = `https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/${YTDLP_ASSET}`;
 
-// ffmpeg/ffprobe are huge (~95MB each). Use the gyan.dev essentials build —
-// a well-maintained Windows static build that's small and battery-included.
-// We extract just the two .exe files we need from the .7z, OR fall back to
-// pre-extracted nightly downloads if 7z isn't available.
-const FFMPEG_RELEASE_URL = 'https://github.com/GyanD/codexffmpeg/releases/download/2024-09-30-git-44a108ce69/ffmpeg-2024-09-30-git-44a108ce69-essentials_build.zip';
+// ffmpeg/ffprobe are huge (~100MB each). We pull one Windows static build and
+// extract just the two .exe files we need.
+//
+// This URL points at a ROLLING tag on purpose. The previous one pinned an exact
+// GyanD build (...44a108ce69...) and that release was later deleted — the
+// download started answering 404. Because this script used to swallow failures,
+// the only symptom would have been an installer shipped with no ffmpeg: every
+// download that needs video+audio merged fails on the user's machine. gyan.dev
+// publishes this "release-essentials" link as a permanent alias for whatever
+// the current release build is, so it cannot rot the same way. (BtbN's rolling
+// "latest" tag also works but its archives are ~50% larger for codecs we never
+// use — yt-dlp only needs ffmpeg to remux and merge streams.)
+const FFMPEG_RELEASE_URL = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';
 
 // macOS has no equivalent all-in-one zip, so we pull the two static binaries
 // straight from ffmpeg-static's release assets — plain, ready-to-run files,
@@ -199,7 +207,9 @@ async function main() {
 main().catch((e) => {
   console.error('\n✗ Binary download failed:', e.message);
   console.error('  You can re-run manually: node scripts/download-binaries.js');
-  // Don't fail the install — user can still develop without binaries
-  // (just can't run downloads until they fetch them).
-  process.exit(0);
+  // Fail loudly. This used to exit(0) so a broken download wouldn't block a
+  // local `npm install` — but the same script runs in CI, and a silent skip
+  // there ships an app whose downloader has no ffmpeg. Set
+  // MEDIAGRAB_ALLOW_MISSING_BINARIES=1 if you only want the npm deps.
+  process.exit(process.env.MEDIAGRAB_ALLOW_MISSING_BINARIES === '1' ? 0 : 1);
 });

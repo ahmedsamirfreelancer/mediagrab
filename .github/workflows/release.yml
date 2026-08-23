@@ -50,8 +50,10 @@ jobs:
             resources/yt-dlp.exe
             resources/ffmpeg.exe
             resources/ffprobe.exe
-          # Bust cache monthly so yt-dlp stays current; ffmpeg version is fixed in the script.
-          key: mediagrab-binaries-${{ runner.os }}-2026-05
+          # Bump this to bust the cache. Bumped 2026-08: the old cache was the
+          # only reason Windows builds still had ffmpeg — the pinned download URL
+          # had 404'd and the script was swallowing the failure.
+          key: mediagrab-binaries-${{ runner.os }}-2026-08b
 
       - name: Install dependencies
         # Using `npm install` (not `npm ci`) so the workflow regenerates the
