@@ -130,7 +130,7 @@ async function bootApp() {
 
 ipcMain.handle('shell:showItemInFolder', async (_evt, filePath) => {
   if (typeof filePath !== 'string' || !filePath) return { success: false };
-  // Long Arabic paths (E:\منتجات التست\<query>\<title>) can exceed Windows'
+  // Long Arabic paths (<output dir>\<query>\<title>) can exceed Windows'
   // 260-char limit, making fs.existsSync + showItemInFolder silently fail. We
   // probe with the \\?\ long-path prefix and walk UP to the first existing
   // ancestor folder, opening that so "المجلد" always lands somewhere useful.

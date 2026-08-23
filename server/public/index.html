@@ -252,7 +252,9 @@
         </div>
         <div class="setting-group">
           <label for="batch-folder">المجلد الأساسي</label>
-          <input type="text" id="batch-folder" spellcheck="false" placeholder="E:\منتجات التست" style="direction:ltr;">
+          <!-- Placeholder is filled from /api/env at runtime — a hard-coded path
+               here would be a stranger's folder on anyone else's machine. -->
+          <input type="text" id="batch-folder" spellcheck="false" placeholder="" style="direction:ltr;">
         </div>
         <div class="setting-group">
           <label for="batch-subfolder">اسم مجلد المنتج</label>

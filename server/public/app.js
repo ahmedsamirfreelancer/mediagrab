@@ -2662,13 +2662,11 @@
   }
 
   // ─── Batch download (paste many links → one folder) ──────────────────
-  // Windows keeps the folder this workflow has always used. Anywhere else
-  // that string is not even a valid absolute path, so the server rejected it
-  // and every embed/batch download failed — fall back to whatever the server
-  // reports as its own default download folder (~/Downloads/MediaGrab on mac).
-  const BATCH_DEFAULT_DIR_WIN = 'E:\\منتجات التست';
+  // Whatever the server reports as its own download folder. This used to be
+  // a hard-coded personal path, which is simply wrong on anyone else machine
+  // (and not even a valid absolute path off Windows). A user who wants a
+  // different folder sets it in Settings and it is remembered.
   function batchDefaultDir() {
-    if (state.env.platform === 'win32') return BATCH_DEFAULT_DIR_WIN;
     return state.env.defaultOutputDir || '';
   }
 
