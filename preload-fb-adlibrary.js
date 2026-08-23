@@ -474,6 +474,17 @@ const { ipcRenderer } = require('electron');
     openBtn.addEventListener('click', () => { ipcRenderer.invoke('facebook-embed:openFolder', currentFolder()); });
     bar.appendChild(openBtn);
 
+    // Real window close — see the note in the embed preloads: a full-screen
+    // window on macOS has no visible traffic lights.
+    const closeWin = document.createElement('button');
+    closeWin.textContent = '✕ إغلاق النافذة';
+    closeWin.title = 'يقفل النافذة ويرجّعك للبرنامج';
+    closeWin.style.cssText = btnStyle('#7f1d1d');
+    closeWin.addEventListener('click', () => {
+      ipcRenderer.invoke('mg-embed:closeWindow').catch(() => {});
+    });
+    bar.appendChild(closeWin);
+
     const note = document.createElement('span');
     note.textContent = '📁 كل إعلان بيتحفظ في فولدر باسم صفحته';
     note.style.cssText = 'opacity:.65;font-size:12px;white-space:nowrap;margin-right:auto;';

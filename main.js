@@ -126,6 +126,18 @@ async function bootApp() {
   if (autoUpdater || IS_MAC) setupAutoUpdater();
 }
 
+/* ─── Embed windows: close from inside ──────────────────────────────────────
+ * The search / ad-library windows are normal framed windows, so closing them
+ * normally means the OS buttons. On macOS a window in full-screen hides the
+ * traffic lights completely (and the menu bar with them), which left the user
+ * with no visible way out of one. Our injected toolbar gets its own close
+ * button and calls this — works on every platform, full-screen or not. */
+ipcMain.handle('mg-embed:closeWindow', (evt) => {
+  const win = BrowserWindow.fromWebContents(evt.sender);
+  if (win && !win.isDestroyed()) win.close();
+  return { success: true };
+});
+
 /* ─── Shell helpers (opening downloaded files/folders) ───────────────────── */
 
 ipcMain.handle('shell:showItemInFolder', async (_evt, filePath) => {

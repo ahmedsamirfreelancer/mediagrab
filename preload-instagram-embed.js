@@ -279,6 +279,17 @@ const { ipcRenderer } = require('electron');
     back.style.cssText = btnStyle('#dc2626');
     back.addEventListener('click', () => { try { history.back(); } catch {} });
     row2.appendChild(back);
+
+    // Real window close. On macOS a full-screen window hides the traffic
+    // lights, so without this there is no visible way to shut the window.
+    const closeWin = document.createElement('button');
+    closeWin.textContent = '✕ إغلاق النافذة';
+    closeWin.title = 'يقفل نافذة البحث ويرجّعك للبرنامج';
+    closeWin.style.cssText = btnStyle('#7f1d1d');
+    closeWin.addEventListener('click', () => {
+      ipcRenderer.invoke('mg-embed:closeWindow').catch(() => {});
+    });
+    row2.appendChild(closeWin);
     bar.appendChild(row2);
 
     (document.body || document.documentElement).appendChild(bar);
