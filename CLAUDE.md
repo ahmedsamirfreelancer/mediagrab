@@ -1,6 +1,6 @@
 # MediaGrab
 
-تطبيق Electron لتنزيل الفيديوهات من TikTok / YouTube / Instagram / Facebook، بواجهة عربية. التشغيل محلياً بـ `npm start` من `E:\ai\downloader-electron`.
+تطبيق Electron لتنزيل الفيديوهات من TikTok / YouTube / Instagram / Facebook، بواجهة عربية. التشغيل محلياً بـ `npm start` من `E:\ai\01-active\mediagrab`.
 
 ## Tech stack
 - **Electron 31+** — تطبيق سطح المكتب (Windows)
@@ -11,7 +11,7 @@
 
 ## هيكل المشروع
 ```
-E:\ai\downloader-electron\
+E:\ai\01-active\mediagrab\
 ├── main.js                # Electron main process (BrowserWindow, IPC, server fork)
 ├── preload-main.js        # contextBridge: instagram/facebook/cookies/license/ytdlp/shell
 ├── preload-fb-adlibrary.js # toolbar + per-ad actions injected into the Ad Library window
@@ -73,7 +73,7 @@ E:\ai\downloader-electron\
 
 ## التشغيل
 ```bash
-cd E:\ai\downloader-electron
+cd E:\ai\01-active\mediagrab
 npm start
 ```
 
@@ -110,3 +110,29 @@ npm start
 - ❌ TikWM `/api/user/posts` (Cloudflare محظور)
 - ❌ إضافة Electron BrowserWindow لـ scraping tiktok.com (تم تجربته وفشل)
 - ❌ تحديث `CLAUDE.md` لكل تغيير — فقط للتغييرات الهيكلية
+
+---
+
+## 🩺 ضد تضخّم الكود
+
+**الحدود:** ملف ≤500 سطر (فوق 1000 = يتقسم) · دالة ≤80 سطر · تكرار ≤5% · تداخل ≤3.
+
+**قبل ما تكتب:** دوّر على الفكرة في الكود الأول. لو موجودة بـ80% — عدّلها،
+متكتبش تانية جنبها.
+
+**ممنوع:** طبقة تجريد لحالة واحدة · flag محدش طلبه · wrapper بيمرّر بس ·
+`try/catch` بيبلع الخطأ بلا لوج · كود متعلّق (مكومنت) · شيل قبل ما تزود.
+
+**قبل «خلص»:**
+```powershell
+E:\ai\03-tools\code-audit\01-scan\run-all.ps1 -Only <المشروع> -SkipDup
+```
+قارن الدرجة والأرقام الخام بآخر تقرير في `E:\ai\03-tools\code-audit\02-reports\`.
+**نزلت = شغلك زوّد التضخّم.**
+
+**بعد أي تقسيم لملف React:** `01-scan\verify-split.ps1` — البناء واللينت
+مابيمسكوش مكوّن JSX مش مستورد.
+**بعد أي شغل على راوترات Express:** `01-scan\route-shadow.ps1` — الراوت الحرفي
+لازم يبقى فوق `/:id`.
+
+📖 القواعد كاملة: `E:\ai\03-tools\code-audit\03-rules\anti-over-engineering.md`
