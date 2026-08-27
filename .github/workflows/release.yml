@@ -6,6 +6,10 @@ on:
     paths-ignore:
       - '**.md'
       - '.gitignore'
+      # تعديل ورك فلو لوحده مايستاهلش إصدار — لو عايز تجرّبه استعمل workflow_dispatch
+      - '.github/workflows/**'
+      # أداة نسخة المشتري — مالهاش علاقة بالتطبيق نفسه
+      - 'scripts/build-buyer-copy.js'
   workflow_dispatch:
     inputs:
       version_bump:

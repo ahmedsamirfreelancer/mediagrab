@@ -1,0 +1,70 @@
+name: sync-buyer
+
+# بيدفع نسخة السورس لريبو المشتري مع كل دفعة على main.
+# اسم ريبو المشتري وحسابه في أسرار الريبو (BUYER_REPO / BUYER_OWNER) — الملف ده
+# عام فمفيش داعي يبان فيه مين المشتري.
+#
+# 🔒 لو الجوب فشل، النسخة بتقف عند المشتري وهو مش هيعرف. جيتهاب بيبعت إيميل
+# «workflow failed» للحساب — ده التنبيه. متعتمدش على اللوج.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 5 * * 1'   # فحص أسبوعي: لو دفعة فاتت لأي سبب، ده بيلحقها
+  workflow_dispatch:
+
+concurrency:
+  group: sync-buyer
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'ahmedsamirfreelancer/mediagrab'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: ابنِ نسخة المشتري
+        run: node scripts/build-buyer-copy.js --out "$RUNNER_TEMP/buyer" --owner "$OWNER"
+        env:
+          OWNER: ${{ secrets.BUYER_OWNER }}
+
+      - name: مفتاح الدفع
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.BUYER_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+
+      - name: ادفع لو فيه اختلاف
+        id: push
+        run: |
+          set -e
+          git clone --depth 1 "git@github.com:${{ secrets.BUYER_REPO }}.git" "$RUNNER_TEMP/buyer-repo"
+          rsync -a --delete --exclude='.git' "$RUNNER_TEMP/buyer/" "$RUNNER_TEMP/buyer-repo/"
+          cd "$RUNNER_TEMP/buyer-repo"
+          git config user.name  "MediaGrab sync"
+          git config user.email "noreply@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=no" >> "$GITHUB_OUTPUT"
+            echo "لا اختلاف — نسخة المشتري متطابقة بالفعل" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          VERSION=$(node -p "require('./package.json').version")
+          git commit -q -m "sync: v${VERSION} (${GITHUB_SHA:0:7})" -m "$(git -C "$GITHUB_WORKSPACE" log -1 --pretty=%s)"
+          git push -q origin HEAD:main
+          echo "changed=yes" >> "$GITHUB_OUTPUT"
+          echo "✅ اتدفع v${VERSION} · $(git diff --stat HEAD~1 HEAD | tail -1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 🚨 فشل السينك
+        if: failure()
+        run: |
+          echo "## 🚨 نسخة المشتري وقفت" >> "$GITHUB_STEP_SUMMARY"
+          echo "الدفعة $GITHUB_SHA ماوصلتش. المشتري شغّال على كود قديم لحد ما يتصلّح." >> "$GITHUB_STEP_SUMMARY"
+          echo "غالباً حارس في scripts/build-buyer-copy.js وقف البناء — شوف لوج خطوة البناء." >> "$GITHUB_STEP_SUMMARY"
