@@ -225,9 +225,35 @@ jobs:
       - name: Publish APK to the release
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          REPO: ahmedsamirfreelancer/mediagrab-releases
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
           APK=android-app/android/app/build/outputs/apk/release/app-release.apk
           cp "$APK" "MediaGrab-$VERSION.apk"
-          gh release upload "$VERSION" "MediaGrab-$VERSION.apk" \
-            --repo ahmedsamirfreelancer/mediagrab-releases --clobber
+
+          # electron-builder tags the release "v1.0.38"; the hand-made 1.0.37
+          # release was tagged "1.0.37". Uploading to a tag that does not exist
+          # is exactly why 1.0.38 shipped with no APK at all. Resolve the tag,
+          # never assume it.
+          TAG=""
+          for candidate in "v$VERSION" "$VERSION"; do
+            if gh release view "$candidate" --repo "$REPO" >/dev/null 2>&1; then
+              TAG="$candidate"; break
+            fi
+          done
+          if [ -z "$TAG" ]; then
+            echo "::error::No release found for $VERSION (tried v$VERSION and $VERSION) - the APK has nowhere to go"
+            exit 1
+          fi
+          echo "Uploading MediaGrab-$VERSION.apk to release $TAG"
+          gh release upload "$TAG" "MediaGrab-$VERSION.apk" --repo "$REPO" --clobber
+
+          # The download page reads the LATEST release and enables the Android
+          # card only when it finds a *.apk asset. A silent no-op upload leaves
+          # a dead card on the page, so prove the asset is really there.
+          if ! gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' | grep -qx "MediaGrab-$VERSION.apk"; then
+            echo "::error::APK is not attached to release $TAG after upload"
+            exit 1
+          fi
+          echo "APK is live on $TAG"
