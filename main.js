@@ -543,7 +543,10 @@ ipcMain.handle('tiktok:status', async () => {
   return { loggedIn, cookiesFile: fs.existsSync(file) ? file : null };
 });
 
-ipcMain.handle('tiktok:login', async () => {
+// Opens TikTok's own login page in our session partition and resolves once
+// the cookie jar actually has a sessionid. Shared by the settings button and
+// by the "log in again" rescue on the empty-results notice.
+function openTiktokLoginWindow() {
   return new Promise((resolve) => {
     const loginWin = new BrowserWindow({
       width: 520,
@@ -584,7 +587,9 @@ ipcMain.handle('tiktok:login', async () => {
 
     loginWin.loadURL(TT_LOGIN_URL);
   });
-});
+}
+
+ipcMain.handle('tiktok:login', async () => openTiktokLoginWindow());
 
 ipcMain.handle('tiktok:logout', async () => {
   const ses = session.fromPartition(TT_SESSION_PARTITION);
@@ -690,24 +695,74 @@ ipcMain.handle('tiktok:openSearchWindow', async (_evt, query, base) => {
   const ses = session.fromPartition(TT_SESSION_PARTITION);
   await injectCookiesFromFileToSession(getTtCookiesFilePath(), ses);
 
+  // Land directly on the Videos tab (denser video grid than the mixed "Top").
+  const url = `https://www.tiktok.com/search/video?q=${encodeURIComponent(query || '')}`;
+  createTiktokEmbedWindow(url);
+  return { success: true };
+});
+
+// Only ever hand a tiktok.com URL to a new window or the system browser: the
+// URL comes from the embedded page's renderer, which is TikTok's own code.
+function isTiktokUrl(u) {
+  try {
+    const h = new URL(String(u)).hostname.toLowerCase();
+    return h === 'tiktok.com' || h.endsWith('.tiktok.com');
+  } catch { return false; }
+}
+
+// A guest window gets a partition with NO `persist:` prefix, i.e. an in-memory
+// session that starts with an empty cookie jar and is thrown away on close —
+// the point of "try without logging in" is that nothing of ours is carried in.
+let ttGuestSeq = 0;
+
+function createTiktokEmbedWindow(url, { guest = false } = {}) {
   const win = new BrowserWindow({
     width: 1200,
     height: 860,
-    title: 'TikTok — دوس «تحميل» على أي فيديو',
+    title: guest ? 'TikTok (زائر — من غير تسجيل دخول)' : 'TikTok — دوس «تحميل» على أي فيديو',
     parent: mainWin || undefined,
     autoHideMenuBar: true,
     backgroundColor: '#000000',
     webPreferences: {
-      partition: TT_SESSION_PARTITION,
+      partition: guest ? `tiktok-guest-${++ttGuestSeq}` : TT_SESSION_PARTITION,
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload-tiktok-embed.js'),
     },
   });
-  // Land directly on the Videos tab (denser video grid than the mixed "Top").
-  const url = `https://www.tiktok.com/search/video?q=${encodeURIComponent(query || '')}`;
   win.loadURL(url);
+  return win;
+}
+
+/* ── Rescues offered when the search window comes back with zero videos ──
+ * TikTok renders an empty page with no message of its own in that case, so the
+ * window just looks broken. Reported 27/08: a logged-in session returned zero
+ * videos for an Arabic search that returned 24 on a logged-out one — an
+ * imported browser session is the prime suspect, so every rescue here is about
+ * changing WHICH session asks. */
+ipcMain.handle('tiktok-embed:openGuest', async (_evt, url) => {
+  if (!isTiktokUrl(url)) return { success: false, error: 'رابط مش بتاع تيك توك' };
+  createTiktokEmbedWindow(url, { guest: true });
   return { success: true };
+});
+
+ipcMain.handle('tiktok-embed:openInBrowser', async (_evt, url) => {
+  if (!isTiktokUrl(url)) return { success: false, error: 'رابط مش بتاع تيك توك' };
+  await shell.openExternal(url);
+  return { success: true };
+});
+
+// Throw away the session we have (imported cookies included) and let the user
+// log in by hand in our own window, then reload the search they were looking at.
+ipcMain.handle('tiktok-embed:relogin', async (evt) => {
+  const ses = session.fromPartition(TT_SESSION_PARTITION);
+  try { await ses.clearStorageData({ storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers'] }); } catch {}
+  try { fs.unlinkSync(getTtCookiesFilePath()); } catch {}
+  // Don't let the auto-puller drag the same rejected cookies straight back in.
+  ttAutoPullDone = true;
+  const r = await openTiktokLoginWindow();
+  if (r && r.success) { try { evt.sender.reload(); } catch {} }
+  return r || { success: false };
 });
 
 // A download button inside the embedded TikTok window was clicked — forward

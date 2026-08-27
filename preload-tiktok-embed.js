@@ -300,6 +300,8 @@ const { ipcRenderer } = require('electron');
     row2.appendChild(closeWin);
     bar.appendChild(row2);
 
+    bar.appendChild(buildEmptyRow());
+
     (document.body || document.documentElement).appendChild(bar);
 
     // Push the page down by the toolbar's real height (two rows, may wrap).
@@ -308,6 +310,78 @@ const { ipcRenderer } = require('electron');
 
     // Fetch the base output dir, then render "base\" before the folder input.
     ipcRenderer.invoke('tiktok-embed:baseDir').then((b) => { baseDir = b || ''; renderBasePath(); }).catch(() => {});
+  }
+
+  /* ── "TikTok returned nothing" notice ──────────────────────────────────
+   * When a search has zero results TikTok paints an empty page and says
+   * nothing at all, so the window reads as a broken app. (27/08: a search in
+   * Arabic came back with zero videos on a logged-in session while the exact
+   * same search returned 24 on a logged-out one.) Say what happened, and offer
+   * only the actions that can actually change the answer — all three change
+   * WHICH session is asking TikTok. */
+  const EMPTY_AFTER_MS = 9000; // TikTok's grid takes ~8s to fill on a slow line
+  let emptySince = 0;   // when the current grid page started out empty
+  let sawCards = false; // cards showed up at least once on this page
+  let lastKey = '';
+
+  function cardCount() {
+    return document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]').length;
+  }
+
+  function buildEmptyRow() {
+    const row = document.createElement('div');
+    row.id = 'mg-empty';
+    row.style.cssText = 'display:none;gap:8px;align-items:center;flex-wrap:wrap;background:#3b1d1d;border:1px solid #7f1d1d;border-radius:8px;padding:8px 12px;';
+
+    const msg = document.createElement('span');
+    msg.style.cssText = 'flex:1;min-width:240px;line-height:1.6;';
+    msg.innerHTML = '⚠️ <strong>تيك توك رجّع صفر فيديو للبحث ده.</strong> '
+      + '<span style="opacity:.85;">ده مش عطل في البرنامج — غالبًا تسجيل الدخول المستورد من المتصفح. جرّب:</span>';
+    row.appendChild(msg);
+
+    const guest = document.createElement('button');
+    guest.textContent = '🕵️ جرّب من غير تسجيل دخول';
+    guest.title = 'يفتح نفس البحث في نافذة نضيفة من غير أي كوكيز';
+    guest.style.cssText = btnStyle('#7c3aed');
+    guest.addEventListener('click', () => {
+      ipcRenderer.invoke('tiktok-embed:openGuest', location.href).catch(() => {});
+    });
+    row.appendChild(guest);
+
+    const relogin = document.createElement('button');
+    relogin.textContent = '🔑 سجّل دخول من جديد';
+    relogin.title = 'يمسح الجلسة الحالية ويخليك تسجّل دخول بإيدك، وبعدين يعيد البحث';
+    relogin.style.cssText = btnStyle('#2563eb');
+    relogin.addEventListener('click', () => {
+      relogin.textContent = '… بيفتح صفحة الدخول';
+      ipcRenderer.invoke('tiktok-embed:relogin')
+        .catch(() => {})
+        .then(() => { relogin.textContent = '🔑 سجّل دخول من جديد'; });
+    });
+    row.appendChild(relogin);
+
+    const browser = document.createElement('button');
+    browser.textContent = '🌐 افتح في المتصفح';
+    browser.title = 'يفتح نفس البحث في متصفحك — لو فاضي هناك كمان يبقى تيك توك نفسه';
+    browser.style.cssText = btnStyle('#374151');
+    browser.addEventListener('click', () => {
+      ipcRenderer.invoke('tiktok-embed:openInBrowser', location.href).catch(() => {});
+    });
+    row.appendChild(browser);
+
+    return row;
+  }
+
+  // Runs every tick. Deliberately waits EMPTY_AFTER_MS before accusing anyone:
+  // an empty grid one second after navigating is just a grid still loading.
+  function updateEmptyNotice() {
+    const row = document.getElementById('mg-empty');
+    if (!row) return;
+    const key = location.pathname + location.search;
+    if (key !== lastKey) { lastKey = key; emptySince = Date.now(); sawCards = false; }
+    if (!isGridPage()) { row.style.display = 'none'; return; }
+    if (cardCount() > 0) { sawCards = true; row.style.display = 'none'; return; }
+    row.style.display = (!sawCards && Date.now() - emptySince > EMPTY_AFTER_MS) ? 'flex' : 'none';
   }
 
   // A "grid" page is one whose thumbnails are a clean list of videos we want to
@@ -396,6 +470,7 @@ const { ipcRenderer } = require('electron');
       const curBtn = document.getElementById('mg-current-btn');
       if (curBtn) curBtn.style.display = onVideo ? '' : 'none';
       addButtons();
+      updateEmptyNotice();
     } catch {}
   }
 
