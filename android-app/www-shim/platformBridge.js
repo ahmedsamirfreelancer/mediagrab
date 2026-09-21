@@ -103,7 +103,7 @@
     ok: true,
     active: [], items: [], results: [], history: [], bookmarks: [],
     watchlist: [], interrupted: [], list: [], saved: [], schedules: [],
-    ids: {}, stats: {}, data: {},
+    ids: [], stats: {}, data: {},
     free: 0, total: 0, used: 0,
   };
 
@@ -154,16 +154,14 @@
     return Promise.reject(new Error('fetch unavailable'));
   };
 
-  // ── UI model: everything opens the embedded browser (pop-up) ───
-  // No in-app fetching/rendering. The URL box and the per-platform search box
-  // open the real site in a native WebView; downloads happen from there.
-  function activePlatform() {
-    var t = document.querySelector('.platform-tab.active');
-    return (t && t.dataset && t.dataset.platform) || 'tiktok';
-  }
+  /* ── The popups, Android-side ────────────────────────────────────────────
+   * The desktop UI asks window.electronAPI.embed to open a platform; on a
+   * phone that is the native WebView (EmbeddedBrowserActivity), which injects
+   * the same download buttons and hands what you tap to the on-device engine.
+   * Same UI, same model, different door. */
 
   function searchUrlFor(platform, q) {
-    var e = encodeURIComponent(q);
+    var e = encodeURIComponent(q || '');
     switch (platform) {
       case 'youtube': return 'https://m.youtube.com/results?search_query=' + e;
       case 'instagram': return 'https://www.instagram.com/explore/search/keyword/?q=' + e;
@@ -176,39 +174,56 @@
     }
   }
 
-  function isUrl(s) { return /^https?:\/\//i.test(s); }
-
-  function openBrowser(value) {
-    var v = (value || '').trim();
-    if (!v) return;
-    var target = isUrl(v) ? v : searchUrlFor(activePlatform(), v);
-    if (Downloader && Downloader.openBrowser) {
-      Downloader.openBrowser({ url: target, platform: activePlatform() });
-    } else {
-      console.warn('[MG_BRIDGE] openBrowser unavailable; would open', target);
+  function homeUrlFor(platform) {
+    switch (platform) {
+      case 'youtube': return 'https://m.youtube.com/';
+      case 'instagram': return 'https://www.instagram.com/';
+      case 'facebook': return 'https://www.facebook.com/watch/';
+      case 'pinterest': return 'https://www.pinterest.com/';
+      case 'adlibrary': return 'https://www.facebook.com/ads/library/';
+      case 'tiktok':
+      default: return 'https://www.tiktok.com/';
     }
   }
 
-  function overrideClick(id, getValue) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener('click', function (e) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      openBrowser(getValue());
-    }, true); // capture + registered before app.js → blocks the original handler
+  function openEmbed(platform, opts) {
+    opts = opts || {};
+    var url = opts.url || (opts.query ? searchUrlFor(platform, opts.query) : homeUrlFor(platform));
+    if (!Downloader || !Downloader.openBrowser) {
+      console.warn('[MG_BRIDGE] openBrowser unavailable; would open', url);
+      return Promise.resolve({ success: false, error: 'المتصفح المدمج مش جاهز' });
+    }
+    Downloader.openBrowser({ url: url, platform: platform });
+    return Promise.resolve({ success: true });
   }
 
+  // Everything the desktop UI reaches for on the Electron side. What a phone
+  // has no answer for resolves to "not here" instead of throwing, so one shared
+  // interface runs on both.
+  var noop = function () { return Promise.resolve({ success: false, error: 'مش متاح على الموبايل' }); };
+  window.electronAPI = window.electronAPI || {
+    embed: {
+      open: openEmbed,
+      // Downloads started inside the native popup come back as engine events,
+      // which the queue already listens to — nothing to forward here.
+      onDownload: function () {},
+      setBaseDir: function () { return Promise.resolve(true); },
+    },
+    instagram: { status: noop, login: noop, logout: noop },
+    facebook: { status: noop, login: noop, logout: noop, openAdLibrary: function (o) { return openEmbed('adlibrary', { query: (o || {}).query }); }, onAdLibDownload: function () {} },
+    tiktok: { status: noop, login: noop, logout: noop, cookiesFromBrowser: noop },
+    pinterest: { status: noop, login: noop, logout: noop },
+    cookies: { import: noop },
+    image: { reverseSearch: noop },
+    app: { version: function () { return Promise.resolve(''); }, checkForUpdate: noop, updateState: noop, installUpdate: noop, onUpdateStatus: function () {} },
+    ytdlp: { check: noop, update: noop },
+    shell: { showItemInFolder: noop, openPath: noop },
+  };
+
   function wireUI() {
+    // There is no server to be connected to on a phone.
     var cs = document.getElementById('connection-status');
     if (cs) cs.style.display = 'none';
-
-    var urlVal = function () { var i = document.getElementById('url-input'); return i ? i.value : ''; };
-    var searchVal = function () { var i = document.getElementById('search-input'); return i ? i.value : ''; };
-
-    overrideClick('download-btn', urlVal);
-    overrideClick('info-btn', urlVal);
-    overrideClick('search-btn', searchVal);
   }
 
   if (document.readyState === 'loading') {

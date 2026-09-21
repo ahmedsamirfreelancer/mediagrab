@@ -15,7 +15,7 @@
  *
  * Downloads are forwarded to the main window's normal queue via the dedicated
  * 'fb-adlib:download' channel; bookkeeping (downloaded marks, folder, stop)
- * reuses the existing 'facebook-embed:*' handlers since the platform is still FB.
+ * reuses the existing 'embed:*' handlers since the platform is still FB.
  */
 const { ipcRenderer } = require('electron');
 
@@ -380,7 +380,7 @@ const { ipcRenderer } = require('electron');
 
   async function refreshDownloadedMarks() {
     try {
-      const ids = await ipcRenderer.invoke('facebook-embed:downloadedIds');
+      const ids = await ipcRenderer.invoke('embed:downloadedIds');
       if (Array.isArray(ids)) downloadedSet = new Set(ids.map(String));
     } catch {}
     for (const dl of document.querySelectorAll('.mg-card-dl[data-adid]')) {
@@ -389,7 +389,7 @@ const { ipcRenderer } = require('electron');
   }
 
   async function resetMarks() {
-    try { await ipcRenderer.invoke('facebook-embed:clearDownloaded'); } catch {}
+    try { await ipcRenderer.invoke('embed:clearDownloaded'); } catch {}
     downloadedSet = new Set();
     for (const dl of document.querySelectorAll('.mg-card-dl[data-adid]')) { dl.textContent = '⬇ تحميل'; dl.style.background = '#7c3aed'; }
   }
@@ -461,7 +461,7 @@ const { ipcRenderer } = require('electron');
     stopBtn.style.cssText = btnStyle('#b91c1c');
     stopBtn.addEventListener('click', async () => {
       try {
-        const r = await ipcRenderer.invoke('facebook-embed:stopAll');
+        const r = await ipcRenderer.invoke('embed:stopAll');
         stopBtn.textContent = '⏹ وقفنا ' + ((r && r.cancelled) || 0);
         setTimeout(() => { stopBtn.textContent = '⏹ إيقاف'; }, 2500);
       } catch {}
@@ -471,7 +471,7 @@ const { ipcRenderer } = require('electron');
     const openBtn = document.createElement('button');
     openBtn.textContent = '📂 فتح المجلد';
     openBtn.style.cssText = btnStyle('#2563eb');
-    openBtn.addEventListener('click', () => { ipcRenderer.invoke('facebook-embed:openFolder', currentFolder()); });
+    openBtn.addEventListener('click', () => { ipcRenderer.invoke('embed:openFolder', currentFolder()); });
     bar.appendChild(openBtn);
 
     // Real window close — see the note in the embed preloads: a full-screen
@@ -481,7 +481,7 @@ const { ipcRenderer } = require('electron');
     closeWin.title = 'يقفل النافذة ويرجّعك للبرنامج';
     closeWin.style.cssText = btnStyle('#7f1d1d');
     closeWin.addEventListener('click', () => {
-      ipcRenderer.invoke('mg-embed:closeWindow').catch(() => {});
+      ipcRenderer.invoke('embed:close').catch(() => {});
     });
     bar.appendChild(closeWin);
 

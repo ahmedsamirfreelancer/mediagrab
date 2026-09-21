@@ -27,11 +27,24 @@ function main() {
     return;
   }
   const files = walk(BACKUP_DIR);
+  let done = 0;
   for (const rel of files) {
-    fs.copyFileSync(path.join(BACKUP_DIR, rel), path.join(ROOT, rel));
+    const dest = path.join(ROOT, rel);
+    // A backup for something the project no longer has is stale, not a job to
+    // do — and throwing on it used to abort the whole restore, leaving the
+    // rest of the backup behind to overwrite good source on the next build.
+    if (!fs.existsSync(path.dirname(dest))) {
+      console.log(`  skipped (gone from the project): ${rel}`);
+      continue;
+    }
+    fs.copyFileSync(path.join(BACKUP_DIR, rel), dest);
     console.log(`  restored: ${rel}`);
+    done++;
   }
-  console.log(`✓ Restored ${files.length} file(s).`);
+  // Nothing outlives the build: a leftover backup is what turns an
+  // interrupted build into lost work.
+  fs.rmSync(BACKUP_DIR, { recursive: true, force: true });
+  console.log(`✓ Restored ${done} file(s).`);
 }
 
 main();

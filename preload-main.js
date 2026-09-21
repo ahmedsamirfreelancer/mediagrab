@@ -1,56 +1,49 @@
 /**
  * Preload for the main MediaGrab window (the one that loads http://127.0.0.1:3456).
- * Exposes Electron-side functionality (Instagram/TikTok login, updates) to the
- * web UI through window.electronAPI.
+ * Exposes the Electron side — opening platform popups, the per-platform
+ * logins, updates and shell helpers — to the web UI as window.electronAPI.
  */
 
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Instagram in-app login + direct API fetch (uses Chromium's network stack
-  // to bypass the bot detection that blocks Node's https module).
+  // The popups: one door for every platform. `open` shows the real site in
+  // its own window with the download toolbar injected; `onDownload` fires
+  // whenever something in one of those windows is queued.
+  embed: {
+    open: (platform, opts) => ipcRenderer.invoke('embed:open', platform, opts),
+    onDownload: (cb) => ipcRenderer.on('embed:download', (_e, data) => cb(data)),
+    setBaseDir: (base) => ipcRenderer.invoke('embed:setBaseDir', base),
+  },
+
+  // Per-platform logins. The popup can log you in by itself, but these give
+  // the UI the current state (and a way out).
   instagram: {
     status: () => ipcRenderer.invoke('instagram:status'),
     login: () => ipcRenderer.invoke('instagram:login'),
     logout: () => ipcRenderer.invoke('instagram:logout'),
-    apiFetch: (url) => ipcRenderer.invoke('instagram:apiFetch', url),
-    searchViaPage: (query) => ipcRenderer.invoke('instagram:searchViaPage', query),
-    // Open instagram.com search in a visible (mobile-UA) window with download
-    // buttons on every reel — the Instagram twin of tiktok.openSearchWindow.
-    openSearchWindow: (query, base) => ipcRenderer.invoke('instagram:openSearchWindow', query, base),
-    onEmbedDownload: (cb) => ipcRenderer.on('instagram-embed:download', (_e, data) => cb(data)),
   },
-  // Facebook in-app login (same pattern as Instagram)
   facebook: {
     status: () => ipcRenderer.invoke('facebook:status'),
     login: () => ipcRenderer.invoke('facebook:login'),
     logout: () => ipcRenderer.invoke('facebook:logout'),
-    openSearchWindow: (query, base) => ipcRenderer.invoke('facebook:openSearchWindow', query, base),
-    onEmbedDownload: (cb) => ipcRenderer.on('facebook-embed:download', (_e, data) => cb(data)),
     // Ad Library (spy tool): opens facebook.com/ads/library with filters, and
     // forwards per-ad creative downloads back here.
     openAdLibrary: (opts) => ipcRenderer.invoke('facebook:openAdLibrary', opts),
     onAdLibDownload: (cb) => ipcRenderer.on('fb-adlib:download', (_e, data) => cb(data)),
   },
-  // TikTok in-app login + real-page search (matches tiktok.com results)
   tiktok: {
     status: () => ipcRenderer.invoke('tiktok:status'),
     login: () => ipcRenderer.invoke('tiktok:login'),
     logout: () => ipcRenderer.invoke('tiktok:logout'),
-    searchViaPage: (query) => ipcRenderer.invoke('tiktok:searchViaPage', query),
     cookiesFromBrowser: () => ipcRenderer.invoke('tiktok:cookiesFromBrowser'),
-    openSearchWindow: (query, base) => ipcRenderer.invoke('tiktok:openSearchWindow', query, base),
-    // Fires when a download button inside the embedded TikTok window is clicked.
-    onEmbedDownload: (cb) => ipcRenderer.on('tiktok-embed:download', (_e, data) => cb(data)),
   },
-  // Manual cookies.txt import — workaround for Chrome 127+ DPAPI lock
   pinterest: {
     status: () => ipcRenderer.invoke('pinterest:status'),
     login: () => ipcRenderer.invoke('pinterest:login'),
     logout: () => ipcRenderer.invoke('pinterest:logout'),
-    openSearchWindow: (query, base) => ipcRenderer.invoke('pinterest:openSearchWindow', query, base),
-    onEmbedDownload: (cb) => ipcRenderer.on('pinterest-embed:download', (_e, data) => cb(data)),
   },
+  // Manual cookies.txt import — workaround for the Chrome 127+ DPAPI lock.
   cookies: {
     import: (platform) => ipcRenderer.invoke('cookies:import', platform),
   },
@@ -59,7 +52,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   image: {
     reverseSearch: (bytes, mime) => ipcRenderer.invoke('image:reverseSearch', bytes, mime),
   },
-  // App version for the header badge (always matches the real build).
   app: {
     version: () => ipcRenderer.invoke('app:getVersion'),
     checkForUpdate: () => ipcRenderer.invoke('app:checkForUpdate'),
@@ -67,14 +59,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
     onUpdateStatus: (cb) => ipcRenderer.on('app-update:status', (_e, data) => cb(data)),
   },
-  // yt-dlp updater
   ytdlp: {
     check: () => ipcRenderer.invoke('ytdlp:check'),
     update: () => ipcRenderer.invoke('ytdlp:update'),
   },
-  // Shell — used to open the downloaded file/folder. Avoids spawning
-  // explorer.exe from the forked Node server, which mishandles UTF-8
-  // paths and detached output.
+  // Opening the downloaded file/folder. Avoids spawning explorer.exe from the
+  // forked Node server, which mishandles UTF-8 paths and detached output.
   shell: {
     showItemInFolder: (filePath) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
     openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),

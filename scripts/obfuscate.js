@@ -44,15 +44,32 @@ const OPTIONS = {
   reservedNames: ['^require$', '^module$', '^exports$', '^process$', '^global$'],
 };
 
+// Obfuscated output is one enormous line of `_0x…` names, so a file that
+// still reads like source has not been through here.
+function looksObfuscated(file) {
+  const head = fs.readFileSync(file, 'utf8').slice(0, 400).trim();
+  return head.startsWith('var _0x') || head.startsWith('const _0x') || head.startsWith('function _0x');
+}
+
+/**
+ * Put a pristine copy in .obfuscate-backup/ before mangling the file.
+ *
+ * The backup is REFRESHED from the current source every run. It used to be
+ * kept forever and copied back OVER the source instead — so a backup left
+ * behind by an interrupted build (restore.js threw on a target the project no
+ * longer had) silently replaced months-newer source with an old snapshot.
+ * The backup only wins when the source is itself still obfuscated, i.e. a
+ * build that really was interrupted.
+ */
 function backupRestore(rel) {
   const src = path.join(ROOT, rel);
   if (!fs.existsSync(src)) return null;
   const backup = path.join(BACKUP_DIR, rel);
   fs.mkdirSync(path.dirname(backup), { recursive: true });
-  if (!fs.existsSync(backup)) {
-    fs.copyFileSync(src, backup);
-  } else {
+  if (fs.existsSync(backup) && looksObfuscated(src)) {
     fs.copyFileSync(backup, src);
+  } else {
+    fs.copyFileSync(src, backup);
   }
   return src;
 }

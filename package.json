@@ -1,6 +1,6 @@
 {
   "name": "mediagrab",
-  "version": "1.0.39",
+  "version": "1.1.0",
   "description": "MediaGrab — Multi-platform video downloader",
   "main": "main.js",
   "author": "Ahmed",
@@ -37,11 +37,14 @@
     "files": [
       "main.js",
       "preload-main.js",
+      "preload-embed-core.js",
+      "preload-youtube-embed.js",
       "preload-tiktok-embed.js",
       "preload-instagram-embed.js",
       "preload-facebook-embed.js",
       "preload-fb-adlibrary.js",
       "preload-pinterest-embed.js",
+      "embed/**/*",
       "server/**/*",
       "node_modules/**/*",
       "package.json"

@@ -2,6 +2,7 @@ const { app, BrowserWindow, dialog, shell, Menu, ipcMain, session } = require('e
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
+const { registerEmbeds, openEmbed } = require('./embed/windows');
 
 // Force the same userData folder in dev (`npm start`) and packaged builds.
 // Without this, dev runs land in %APPDATA%/mediagrab (lowercase name from
@@ -111,6 +112,14 @@ function createMainWindow() {
     return { action: 'deny' };
   });
 
+  // In dev (`npm start`) the renderer's console is invisible from the
+  // terminal, which hides exactly the errors that break the UI on boot.
+  if (!app.isPackaged) {
+    mainWin.webContents.on('console-message', (_e, level, message, line, source) => {
+      if (level >= 2) console.log(`[ui] ${message} (${source}:${line})`);
+    });
+  }
+
   mainWin.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
   mainWin.on('closed', () => { mainWin = null; });
 }
@@ -125,18 +134,6 @@ async function bootApp() {
   ensureTiktokLoggedInAuto();
   if (autoUpdater || IS_MAC) setupAutoUpdater();
 }
-
-/* ─── Embed windows: close from inside ──────────────────────────────────────
- * The search / ad-library windows are normal framed windows, so closing them
- * normally means the OS buttons. On macOS a window in full-screen hides the
- * traffic lights completely (and the menu bar with them), which left the user
- * with no visible way out of one. Our injected toolbar gets its own close
- * button and calls this — works on every platform, full-screen or not. */
-ipcMain.handle('mg-embed:closeWindow', (evt) => {
-  const win = BrowserWindow.fromWebContents(evt.sender);
-  if (win && !win.isDestroyed()) win.close();
-  return { success: true };
-});
 
 /* ─── Shell helpers (opening downloaded files/folders) ───────────────────── */
 
@@ -682,174 +679,6 @@ async function ensureTiktokLoggedInAuto() {
   } catch {}
 }
 
-/* Open the REAL tiktok.com search in a visible window with download buttons
- * injected on every video (via preload-tiktok-embed.js). This gives the user
- * TikTok's exact, complete results with one-click downloading — the most
- * faithful "same as TikTok" experience. */
-let lastEmbedBase = ''; // base output dir for the embedded window's downloads
-ipcMain.handle('tiktok:openSearchWindow', async (_evt, query, base) => {
-  lastEmbedBase = base || lastEmbedBase || '';
-  // Make sure we've tried to pull the browser login before showing results,
-  // so the window opens already logged in (guests get few/no video results).
-  await ensureTiktokLoggedInAuto();
-  const ses = session.fromPartition(TT_SESSION_PARTITION);
-  await injectCookiesFromFileToSession(getTtCookiesFilePath(), ses);
-
-  // Land directly on the Videos tab (denser video grid than the mixed "Top").
-  const url = `https://www.tiktok.com/search/video?q=${encodeURIComponent(query || '')}`;
-  createTiktokEmbedWindow(url);
-  return { success: true };
-});
-
-// Only ever hand a tiktok.com URL to a new window or the system browser: the
-// URL comes from the embedded page's renderer, which is TikTok's own code.
-function isTiktokUrl(u) {
-  try {
-    const h = new URL(String(u)).hostname.toLowerCase();
-    return h === 'tiktok.com' || h.endsWith('.tiktok.com');
-  } catch { return false; }
-}
-
-// A guest window gets a partition with NO `persist:` prefix, i.e. an in-memory
-// session that starts with an empty cookie jar and is thrown away on close —
-// the point of "try without logging in" is that nothing of ours is carried in.
-let ttGuestSeq = 0;
-
-function createTiktokEmbedWindow(url, { guest = false } = {}) {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 860,
-    title: guest ? 'TikTok (زائر — من غير تسجيل دخول)' : 'TikTok — دوس «تحميل» على أي فيديو',
-    parent: mainWin || undefined,
-    autoHideMenuBar: true,
-    backgroundColor: '#000000',
-    webPreferences: {
-      partition: guest ? `tiktok-guest-${++ttGuestSeq}` : TT_SESSION_PARTITION,
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, 'preload-tiktok-embed.js'),
-    },
-  });
-  win.loadURL(url);
-  return win;
-}
-
-/* ── Rescues offered when the search window comes back with zero videos ──
- * TikTok renders an empty page with no message of its own in that case, so the
- * window just looks broken. Reported 27/08: a logged-in session returned zero
- * videos for an Arabic search that returned 24 on a logged-out one — an
- * imported browser session is the prime suspect, so every rescue here is about
- * changing WHICH session asks. */
-ipcMain.handle('tiktok-embed:openGuest', async (_evt, url) => {
-  if (!isTiktokUrl(url)) return { success: false, error: 'رابط مش بتاع تيك توك' };
-  createTiktokEmbedWindow(url, { guest: true });
-  return { success: true };
-});
-
-ipcMain.handle('tiktok-embed:openInBrowser', async (_evt, url) => {
-  if (!isTiktokUrl(url)) return { success: false, error: 'رابط مش بتاع تيك توك' };
-  await shell.openExternal(url);
-  return { success: true };
-});
-
-// Throw away the session we have (imported cookies included) and let the user
-// log in by hand in our own window, then reload the search they were looking at.
-ipcMain.handle('tiktok-embed:relogin', async (evt) => {
-  const ses = session.fromPartition(TT_SESSION_PARTITION);
-  try { await ses.clearStorageData({ storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers'] }); } catch {}
-  try { fs.unlinkSync(getTtCookiesFilePath()); } catch {}
-  // Don't let the auto-puller drag the same rejected cookies straight back in.
-  ttAutoPullDone = true;
-  const r = await openTiktokLoginWindow();
-  if (r && r.success) { try { evt.sender.reload(); } catch {} }
-  return r || { success: false };
-});
-
-// A download button inside the embedded TikTok window was clicked — forward
-// the video URL + chosen folder to the main window's normal download queue.
-ipcMain.on('tiktok-embed:download', (_evt, payload) => {
-  const hasWork = payload && (payload.url || (Array.isArray(payload.urls) && payload.urls.length));
-  if (mainWin && hasWork) {
-    mainWin.webContents.send('tiktok-embed:download', payload);
-  }
-});
-
-// The embedded window asks which TikTok videos were already downloaded, so it
-// can badge them with a "✓ اتحمّل" mark (still clickable for re-download).
-ipcMain.handle('tiktok-embed:downloadedIds', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').get(`http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=tiktok`, (res) => {
-        let d = '';
-        res.on('data', (c) => (d += c));
-        res.on('end', () => { try { resolve(JSON.parse(d).ids || []); } catch { resolve([]); } });
-      });
-      req.on('error', () => resolve([]));
-      req.setTimeout(4000, () => { req.destroy(); resolve([]); });
-    } catch { resolve([]); }
-  });
-});
-
-// The embedded window asks for its base download dir (to show the full path).
-ipcMain.handle('tiktok-embed:baseDir', async () => lastEmbedBase);
-
-// "فتح" button — open <base>\<folder> (or the base if that folder isn't there
-// yet), handling Arabic/long paths the same way shell:showItemInFolder does.
-ipcMain.handle('tiktok-embed:openFolder', async (_evt, folder) => {
-  try {
-    const winLong = (p) => (process.platform === 'win32' && !p.startsWith('\\\\?\\')) ? '\\\\?\\' + p : p;
-    const exists = (p) => { try { return fs.existsSync(p) || fs.existsSync(winLong(p)); } catch { return false; } };
-    let target = lastEmbedBase || '';
-    if (folder) {
-      const joined = path.join(lastEmbedBase || '', String(folder));
-      if (exists(joined)) target = joined;
-    }
-    if (!target) return { success: false, error: 'مفيش مسار' };
-    if (!exists(target)) { try { fs.mkdirSync(winLong(target), { recursive: true }); } catch {} }
-    let err = await shell.openPath(winLong(target));
-    if (err) err = await shell.openPath(target);
-    return err ? { success: false, error: err } : { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-// Stop button inside the embedded window — cancel all active downloads.
-ipcMain.handle('tiktok-embed:stopAll', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').request(
-        `http://127.0.0.1:${SERVER_PORT}/api/cancel-all`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } },
-        (res) => {
-          let d = '';
-          res.on('data', (c) => (d += c));
-          res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({ cancelled: 0 }); } });
-        }
-      );
-      req.on('error', () => resolve({ cancelled: 0 }));
-      req.setTimeout(5000, () => { req.destroy(); resolve({ cancelled: 0 }); });
-      req.end('{}');
-    } catch { resolve({ cancelled: 0 }); }
-  });
-});
-
-// Reset the "✓ اتحمّل" marks — clears the TikTok downloaded-ids on the server.
-ipcMain.handle('tiktok-embed:clearDownloaded', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').request(
-        `http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=tiktok`,
-        { method: 'DELETE' },
-        (res) => { res.on('data', () => {}); res.on('end', () => resolve({ success: true })); }
-      );
-      req.on('error', () => resolve({ success: false }));
-      req.setTimeout(4000, () => { req.destroy(); resolve({ success: false }); });
-      req.end();
-    } catch { resolve({ success: false }); }
-  });
-});
-
 /* ─── Pinterest embedded search (mirrors the TikTok embed) ────────────────
  * Open pinterest.com's real pins search in a visible window with a download
  * button on every pin (via preload-pinterest-embed.js). Pinterest browsing and
@@ -946,324 +775,154 @@ ipcMain.handle('pinterest:logout', async () => {
   return { success: true };
 });
 
-ipcMain.handle('pinterest:openSearchWindow', async (_evt, query, base) => {
-  lastEmbedBase = base || lastEmbedBase || '';
-  const ses = session.fromPartition(PIN_SESSION_PARTITION);
-  if (!(await isPinterestLoggedIn())) {
-    await injectCookiesFromFileToSession(getPinterestCookiesFilePath(), ses);
-  }
+/* ─── The user agents the popups wear ────────────────────────────────────── */
 
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 860,
-    title: 'Pinterest — دوس «تحميل» على أي صورة/فيديو',
-    parent: mainWin || undefined,
-    autoHideMenuBar: true,
-    backgroundColor: '#ffffff',
-    webPreferences: {
-      partition: PIN_SESSION_PARTITION,
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, 'preload-pinterest-embed.js'),
-    },
-  });
-  // If the user logs in inside this window, refresh the cookies file so the
-  // server's yt-dlp can reach gated video pins.
-  win.webContents.on('did-navigate', async () => {
-    try { if (await isPinterestLoggedIn()) await persistPinterestCookies(); } catch {}
-  });
-  const url = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query || '')}`;
-  win.loadURL(url);
-  return { success: true };
-});
-
-// A download button inside the embedded Pinterest window was clicked — forward
-// the pin URL + chosen folder to the main window's normal download queue.
-ipcMain.on('pinterest-embed:download', (_evt, payload) => {
-  const hasWork = payload && (payload.url || (Array.isArray(payload.urls) && payload.urls.length));
-  if (mainWin && hasWork) {
-    mainWin.webContents.send('pinterest-embed:download', payload);
-  }
-});
-
-// The embedded window asks which Pinterest pins were already downloaded.
-ipcMain.handle('pinterest-embed:downloadedIds', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').get(`http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=pinterest`, (res) => {
-        let d = '';
-        res.on('data', (c) => (d += c));
-        res.on('end', () => { try { resolve(JSON.parse(d).ids || []); } catch { resolve([]); } });
-      });
-      req.on('error', () => resolve([]));
-      req.setTimeout(4000, () => { req.destroy(); resolve([]); });
-    } catch { resolve([]); }
-  });
-});
-
-// The embedded window asks for its base download dir (to show the full path).
-ipcMain.handle('pinterest-embed:baseDir', async () => lastEmbedBase);
-
-// "فتح" button — open <base>\<folder> (or the base if that folder isn't there).
-ipcMain.handle('pinterest-embed:openFolder', async (_evt, folder) => {
-  try {
-    const winLong = (p) => (process.platform === 'win32' && !p.startsWith('\\\\?\\')) ? '\\\\?\\' + p : p;
-    const exists = (p) => { try { return fs.existsSync(p) || fs.existsSync(winLong(p)); } catch { return false; } };
-    let target = lastEmbedBase || '';
-    if (folder) {
-      const joined = path.join(lastEmbedBase || '', String(folder));
-      if (exists(joined)) target = joined;
-    }
-    if (!target) return { success: false, error: 'مفيش مسار' };
-    if (!exists(target)) { try { fs.mkdirSync(winLong(target), { recursive: true }); } catch {} }
-    let err = await shell.openPath(winLong(target));
-    if (err) err = await shell.openPath(target);
-    return err ? { success: false, error: err } : { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-// Stop button inside the embedded window — cancel all active downloads.
-ipcMain.handle('pinterest-embed:stopAll', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').request(
-        `http://127.0.0.1:${SERVER_PORT}/api/cancel-all`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } },
-        (res) => {
-          let d = '';
-          res.on('data', (c) => (d += c));
-          res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({ cancelled: 0 }); } });
-        }
-      );
-      req.on('error', () => resolve({ cancelled: 0 }));
-      req.setTimeout(5000, () => { req.destroy(); resolve({ cancelled: 0 }); });
-      req.end('{}');
-    } catch { resolve({ cancelled: 0 }); }
-  });
-});
-
-// Reset the "✓ اتحمّل" marks — clears the Pinterest downloaded-ids on the server.
-ipcMain.handle('pinterest-embed:clearDownloaded', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').request(
-        `http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=pinterest`,
-        { method: 'DELETE' },
-        (res) => { res.on('data', () => {}); res.on('end', () => resolve({ success: true })); }
-      );
-      req.on('error', () => resolve({ success: false }));
-      req.setTimeout(4000, () => { req.destroy(); resolve({ success: false }); });
-      req.end();
-    } catch { resolve({ success: false }); }
-  });
-});
-
-/* ─── Instagram embedded search (mirrors the TikTok embed) ────────────────
- * Open instagram.com's real search in a visible window with download buttons
- * on every reel/post (via preload-instagram-embed.js). The window uses a
- * MOBILE user-agent so Instagram serves its phone layout — the only one whose
- * keyword search surfaces Reels (the desktop site hides them). */
-
-// An Android Chrome (mobile) UA. Instagram keys its "this is a phone → show
-// Reels in search" behaviour off any phone UA, so this still surfaces Reels in
-// keyword search — but UNLIKE an iPhone Safari UA it makes Instagram serve the
-// reel video as Chromium-playable MSE/MP4 instead of native-HLS (.m3u8), which
-// our Chromium window can't play (the video would just sit there frozen).
+// An Android Chrome (mobile) UA. Instagram serves its phone layout to any
+// phone UA, and that is the only layout whose keyword search surfaces Reels.
+// UNLIKE an iPhone Safari UA it also makes Instagram serve the reel as
+// Chromium-playable MSE/MP4 instead of native HLS (.m3u8), which our window
+// cannot play — the video would just sit there frozen.
 const IG_MOBILE_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
-
-ipcMain.handle('instagram:openSearchWindow', async (_evt, query, base) => {
-  lastEmbedBase = base || lastEmbedBase || '';
-  const ses = session.fromPartition(IG_SESSION_PARTITION);
-  // The persistent partition is the source of truth once a real login exists.
-  // ONLY seed it from the cookies file when the live session has no sessionid
-  // — otherwise every search overwrites a freshly-rotated/relogged sessionid
-  // with the stale file snapshot, which bounces the user back to the login
-  // screen again and again (the "logs in then out every time" loop).
-  if (!(await isInstagramLoggedIn())) {
-    await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
-  }
-
-  const win = new BrowserWindow({
-    // Keep the width UNDER Instagram's ~736px tablet breakpoint: above it the
-    // mobile site flips to the desktop sidebar layout, whose keyword search
-    // hides Reels and just spins. At this width we stay in the clean phone
-    // Reels grid; curateGrid() in the preload re-flows it into more columns so
-    // it still feels wide. (700 ≈ as wide as we can go before the flip.)
-    width: 700,
-    height: 940,
-    title: 'Instagram — دوس «تحميل» على أي ريل',
-    parent: mainWin || undefined,
-    autoHideMenuBar: true,
-    backgroundColor: '#000000',
-    webPreferences: {
-      partition: IG_SESSION_PARTITION,
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, 'preload-instagram-embed.js'),
-      // Let Instagram's player start the reel without a manual gesture —
-      // Chromium's default autoplay block otherwise leaves it frozen.
-      autoplayPolicy: 'no-user-gesture-required',
-    },
-  });
-  // Spoof a phone for every request this window makes (page + XHR), so
-  // Instagram's keyword search returns Reels.
-  try { win.webContents.setUserAgent(IG_MOBILE_UA); } catch {}
-  // If the user (re)logs in via Instagram's one-tap screen inside this window,
-  // refresh the cookies file from the now-current session so yt-dlp downloads
-  // keep working and a later search doesn't re-inject a dead sessionid.
-  win.webContents.on('did-navigate', async () => {
-    try { if (await isInstagramLoggedIn()) await persistInstagramCookies(); } catch {}
-  });
-  const url = `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(query || '')}`;
-  win.loadURL(url, { userAgent: IG_MOBILE_UA });
-  return { success: true };
-});
-
-// A download button inside the embedded Instagram window was clicked — forward
-// the reel/post URL + folder to the main window's normal download queue.
-ipcMain.on('instagram-embed:download', (_evt, payload) => {
-  const hasWork = payload && (
-    payload.url ||
-    (Array.isArray(payload.urls) && payload.urls.length) ||
-    (Array.isArray(payload.items) && payload.items.length)
-  );
-  if (mainWin && hasWork) {
-    mainWin.webContents.send('instagram-embed:download', payload);
-  }
-});
-
-// Which Instagram items were already downloaded → badge them.
-ipcMain.handle('instagram-embed:downloadedIds', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').get(`http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=instagram`, (res) => {
-        let d = '';
-        res.on('data', (c) => (d += c));
-        res.on('end', () => { try { resolve(JSON.parse(d).ids || []); } catch { resolve([]); } });
-      });
-      req.on('error', () => resolve([]));
-      req.setTimeout(4000, () => { req.destroy(); resolve([]); });
-    } catch { resolve([]); }
-  });
-});
-
-// The embed shares the same base output dir + folder-open + stop-all plumbing
-// as TikTok (lastEmbedBase is shared); only the platform-tagged endpoints differ.
-ipcMain.handle('instagram-embed:baseDir', async () => lastEmbedBase);
-
-ipcMain.handle('instagram-embed:openFolder', async (_evt, folder) => {
-  try {
-    const winLong = (p) => (process.platform === 'win32' && !p.startsWith('\\\\?\\')) ? '\\\\?\\' + p : p;
-    const exists = (p) => { try { return fs.existsSync(p) || fs.existsSync(winLong(p)); } catch { return false; } };
-    let target = lastEmbedBase || '';
-    if (folder) {
-      const joined = path.join(lastEmbedBase || '', String(folder));
-      if (exists(joined)) target = joined;
-    }
-    if (!target) return { success: false, error: 'مفيش مسار' };
-    if (!exists(target)) { try { fs.mkdirSync(winLong(target), { recursive: true }); } catch {} }
-    let err = await shell.openPath(winLong(target));
-    if (err) err = await shell.openPath(target);
-    return err ? { success: false, error: err } : { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('instagram-embed:stopAll', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').request(
-        `http://127.0.0.1:${SERVER_PORT}/api/cancel-all`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } },
-        (res) => {
-          let d = '';
-          res.on('data', (c) => (d += c));
-          res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({ cancelled: 0 }); } });
-        }
-      );
-      req.on('error', () => resolve({ cancelled: 0 }));
-      req.setTimeout(5000, () => { req.destroy(); resolve({ cancelled: 0 }); });
-      req.end('{}');
-    } catch { resolve({ cancelled: 0 }); }
-  });
-});
-
-ipcMain.handle('instagram-embed:clearDownloaded', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').request(
-        `http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=instagram`,
-        { method: 'DELETE' },
-        (res) => { res.on('data', () => {}); res.on('end', () => resolve({ success: true })); }
-      );
-      req.on('error', () => resolve({ success: false }));
-      req.setTimeout(4000, () => { req.destroy(); resolve({ success: false }); });
-      req.end();
-    } catch { resolve({ success: false }); }
-  });
-});
-
-/* ─── Facebook embedded video search (mirrors the Instagram embed) ────────── */
 
 const FB_MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 // Ad Library wants the DESKTOP grid layout, not the mobile single column.
 const FB_DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-ipcMain.handle('facebook:openSearchWindow', async (_evt, query, base) => {
-  lastEmbedBase = base || lastEmbedBase || '';
-  const ses = session.fromPartition(FB_SESSION_PARTITION);
-  await injectCookiesFromFileToSession(getFbCookiesFilePath(), ses);
+/* ─── The popup registry ────────────────────────────────────────────────────
+ * What differs between platforms, in one table: where its session lives, which
+ * preload wears the download toolbar, how it spells a search URL, and what has
+ * to happen before its window opens. Everything else about popups —
+ * forwarding downloads, badges, stop, open-folder — is embed/windows.js. */
 
-  const win = new BrowserWindow({
-    width: 760,
-    height: 940,
-    title: 'Facebook — دوس «تحميل» على أي فيديو',
-    parent: mainWin || undefined,
-    autoHideMenuBar: true,
-    backgroundColor: '#000000',
-    webPreferences: {
-      partition: FB_SESSION_PARTITION,
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, 'preload-facebook-embed.js'),
+const EMBED_PLATFORMS = {
+  tiktok: {
+    title: 'TikTok — دوس «تحميل» على أي فيديو',
+    hosts: ['tiktok.com'],
+    partition: TT_SESSION_PARTITION,
+    preload: 'preload-tiktok-embed.js',
+    width: 1200, height: 860, background: '#000000',
+    // Land on the Videos tab: a denser video grid than the mixed "Top".
+    search: (q) => `https://www.tiktok.com/search/video?q=${encodeURIComponent(q)}`,
+    home: () => 'https://www.tiktok.com/',
+    cookiesFile: getTtCookiesFilePath,
+    // Pull the browser login BEFORE showing results — a guest session gets
+    // few or no videos back.
+    prepare: async () => {
+      await ensureTiktokLoggedInAuto();
+      await injectCookiesFromFileToSession(getTtCookiesFilePath(), session.fromPartition(TT_SESSION_PARTITION));
     },
-  });
-  try { win.webContents.setUserAgent(FB_MOBILE_UA); } catch {}
-  // Facebook's dedicated video search.
-  const url = `https://www.facebook.com/watch/search/?query=${encodeURIComponent(query || '')}`;
-  win.loadURL(url, { userAgent: FB_MOBILE_UA });
-  return { success: true };
+    relogin: async () => {
+      const ses = session.fromPartition(TT_SESSION_PARTITION);
+      try { await ses.clearStorageData({ storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers'] }); } catch {}
+      try { fs.unlinkSync(getTtCookiesFilePath()); } catch {}
+      // Don't let the auto-puller drag the same rejected cookies back in.
+      ttAutoPullDone = true;
+      return openTiktokLoginWindow();
+    },
+  },
+
+  youtube: {
+    title: 'YouTube — دوس «تحميل» على أي فيديو',
+    hosts: ['youtube.com', 'youtu.be'],
+    partition: 'persist:youtube',
+    preload: 'preload-youtube-embed.js',
+    width: 1280, height: 900, background: '#0f0f0f',
+    search: (q) => `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`,
+    home: () => 'https://www.youtube.com/',
+    loginUrl: 'https://accounts.google.com/ServiceLogin?service=youtube',
+  },
+
+  instagram: {
+    title: 'Instagram — دوس «تحميل» على أي ريل',
+    hosts: ['instagram.com', 'instagr.am'],
+    partition: IG_SESSION_PARTITION,
+    preload: 'preload-instagram-embed.js',
+    // Stay UNDER Instagram's ~736px tablet breakpoint: above it the mobile
+    // site flips to the desktop sidebar layout, whose keyword search hides
+    // Reels and just spins.
+    width: 700, height: 940, background: '#000000',
+    userAgent: IG_MOBILE_UA,
+    search: (q) => `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(q)}`,
+    home: () => 'https://www.instagram.com/',
+    loginUrl: IG_LOGIN_URL,
+    cookiesFile: getCookiesFilePath,
+    // The live session is the source of truth once a real login exists. Only
+    // seed from the file when it has no sessionid — otherwise every search
+    // overwrites a freshly-rotated one with the stale snapshot, which is the
+    // "logs in then out every time" loop.
+    prepare: async () => {
+      if (await isInstagramLoggedIn()) return;
+      await injectCookiesFromFileToSession(getCookiesFilePath(), session.fromPartition(IG_SESSION_PARTITION));
+    },
+    // If they (re)log in via Instagram's one-tap screen inside the window,
+    // refresh the cookies file so yt-dlp keeps working.
+    onNavigate: async () => { if (await isInstagramLoggedIn()) await persistInstagramCookies(); },
+  },
+
+  facebook: {
+    title: 'Facebook — دوس «تحميل» على أي فيديو',
+    hosts: ['facebook.com', 'fb.watch', 'fb.com'],
+    partition: FB_SESSION_PARTITION,
+    preload: 'preload-facebook-embed.js',
+    width: 760, height: 940, background: '#000000',
+    userAgent: FB_MOBILE_UA,
+    search: (q) => `https://www.facebook.com/watch/search/?query=${encodeURIComponent(q)}`,
+    home: () => 'https://www.facebook.com/watch/',
+    loginUrl: FB_LOGIN_URL,
+    cookiesFile: getFbCookiesFilePath,
+    prepare: async () => {
+      await injectCookiesFromFileToSession(getFbCookiesFilePath(), session.fromPartition(FB_SESSION_PARTITION));
+    },
+  },
+
+  pinterest: {
+    title: 'Pinterest — دوس «تحميل» على أي صورة/فيديو',
+    hosts: ['pinterest.com', 'pin.it'],
+    partition: PIN_SESSION_PARTITION,
+    preload: 'preload-pinterest-embed.js',
+    width: 1200, height: 860, background: '#ffffff',
+    search: (q) => `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(q)}`,
+    home: () => 'https://www.pinterest.com/',
+    loginUrl: PIN_LOGIN_URL,
+    cookiesFile: getPinterestCookiesFilePath,
+    // Browsing works logged out; a login inside the window is persisted so
+    // yt-dlp can reach gated video pins too.
+    prepare: async () => {
+      if (await isPinterestLoggedIn()) return;
+      await injectCookiesFromFileToSession(getPinterestCookiesFilePath(), session.fromPartition(PIN_SESSION_PARTITION));
+    },
+    onNavigate: async () => { if (await isPinterestLoggedIn()) await persistPinterestCookies(); },
+  },
+
+  // The Ad Library browses Facebook with a different preload and the DESKTOP
+  // layout, and shares Facebook's session and downloaded-ids list.
+  adlibrary: {
+    title: 'مكتبة إعلانات فيسبوك — MediaGrab',
+    hosts: ['facebook.com'],
+    partition: FB_SESSION_PARTITION,
+    idsPlatform: 'facebook',
+    preload: 'preload-fb-adlibrary.js',
+    width: 1180, height: 940, background: '#0b0b14',
+    userAgent: FB_DESKTOP_UA,
+    search: (q) => adLibraryUrl({ query: q }),
+    home: () => adLibraryUrl({}),
+    prepare: async () => {
+      await injectCookiesFromFileToSession(getFbCookiesFilePath(), session.fromPartition(FB_SESSION_PARTITION));
+    },
+  },
+};
+
+registerEmbeds({
+  getMainWin: () => mainWin,
+  serverPort: SERVER_PORT,
+  platforms: EMBED_PLATFORMS,
 });
 
 /* ─── Facebook Ad Library (the "spy tool" surface) ─────────────────────────── */
 
-ipcMain.handle('facebook:openAdLibrary', async (_evt, opts) => {
-  opts = opts || {};
-  lastEmbedBase = opts.base || lastEmbedBase || '';
-  const ses = session.fromPartition(FB_SESSION_PARTITION);
-  await injectCookiesFromFileToSession(getFbCookiesFilePath(), ses);
-
-  const win = new BrowserWindow({
-    width: 1180,
-    height: 940,
-    title: 'مكتبة إعلانات فيسبوك — MediaGrab',
-    parent: mainWin || undefined,
-    autoHideMenuBar: true,
-    backgroundColor: '#0b0b14',
-    webPreferences: {
-      partition: FB_SESSION_PARTITION,
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, 'preload-fb-adlibrary.js'),
-    },
-  });
-  try { win.webContents.setUserAgent(FB_DESKTOP_UA); } catch {}
-
-  // "Winning products" filter: ads still ACTIVE that started running ≥ N days
-  // ago. Done with Facebook's own start_date[max] = (today − N days) param.
+// "Winning products" = ads still ACTIVE that started running ≥ N days ago,
+// which is Facebook's own start_date[max] = (today − N days).
+function adLibraryUrl(opts) {
   const minDays = parseInt(opts.minDays, 10) || 0;
   const params = new URLSearchParams({
     active_status: minDays > 0 ? 'active' : (opts.activeStatus || 'active'),
@@ -1275,13 +934,16 @@ ipcMain.handle('facebook:openAdLibrary', async (_evt, opts) => {
   });
   if (opts.lang) params.set('content_languages[0]', opts.lang);
   if (minDays > 0) {
-    const cutoff = new Date(Date.now() - minDays * 86400000).toISOString().slice(0, 10);
-    params.set('start_date[max]', cutoff);
+    params.set('start_date[max]', new Date(Date.now() - minDays * 86400000).toISOString().slice(0, 10));
   }
-  const url = `https://www.facebook.com/ads/library/?${params.toString()}`;
-  win.loadURL(url, { userAgent: FB_DESKTOP_UA });
-  return { success: true };
+  return `https://www.facebook.com/ads/library/?${params.toString()}`;
+}
+
+ipcMain.handle('facebook:openAdLibrary', async (_evt, opts) => {
+  opts = opts || {};
+  return openEmbed('adlibrary', { url: adLibraryUrl(opts), base: opts.base });
 });
+
 
 // Forward Ad Library creative downloads to the main window's queue.
 ipcMain.on('fb-adlib:download', (_evt, payload) => {
@@ -1415,167 +1077,7 @@ ipcMain.handle('app:installUpdate', () => {
   try { setImmediate(() => autoUpdater.quitAndInstall()); return true; } catch { return false; }
 });
 
-ipcMain.on('facebook-embed:download', (_evt, payload) => {
-  const hasWork = payload && (payload.url || (Array.isArray(payload.urls) && payload.urls.length));
-  if (mainWin && hasWork) {
-    mainWin.webContents.send('facebook-embed:download', payload);
-  }
-});
 
-ipcMain.handle('facebook-embed:downloadedIds', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').get(`http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=facebook`, (res) => {
-        let d = '';
-        res.on('data', (c) => (d += c));
-        res.on('end', () => { try { resolve(JSON.parse(d).ids || []); } catch { resolve([]); } });
-      });
-      req.on('error', () => resolve([]));
-      req.setTimeout(4000, () => { req.destroy(); resolve([]); });
-    } catch { resolve([]); }
-  });
-});
-
-ipcMain.handle('facebook-embed:baseDir', async () => lastEmbedBase);
-
-ipcMain.handle('facebook-embed:openFolder', async (_evt, folder) => {
-  try {
-    const winLong = (p) => (process.platform === 'win32' && !p.startsWith('\\\\?\\')) ? '\\\\?\\' + p : p;
-    const exists = (p) => { try { return fs.existsSync(p) || fs.existsSync(winLong(p)); } catch { return false; } };
-    let target = lastEmbedBase || '';
-    if (folder) {
-      const joined = path.join(lastEmbedBase || '', String(folder));
-      if (exists(joined)) target = joined;
-    }
-    if (!target) return { success: false, error: 'مفيش مسار' };
-    if (!exists(target)) { try { fs.mkdirSync(winLong(target), { recursive: true }); } catch {} }
-    let err = await shell.openPath(winLong(target));
-    if (err) err = await shell.openPath(target);
-    return err ? { success: false, error: err } : { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('facebook-embed:stopAll', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').request(
-        `http://127.0.0.1:${SERVER_PORT}/api/cancel-all`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } },
-        (res) => {
-          let d = '';
-          res.on('data', (c) => (d += c));
-          res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({ cancelled: 0 }); } });
-        }
-      );
-      req.on('error', () => resolve({ cancelled: 0 }));
-      req.setTimeout(5000, () => { req.destroy(); resolve({ cancelled: 0 }); });
-      req.end('{}');
-    } catch { resolve({ cancelled: 0 }); }
-  });
-});
-
-ipcMain.handle('facebook-embed:clearDownloaded', async () => {
-  return new Promise((resolve) => {
-    try {
-      const req = require('http').request(
-        `http://127.0.0.1:${SERVER_PORT}/api/downloaded-ids?platform=facebook`,
-        { method: 'DELETE' },
-        (res) => { res.on('data', () => {}); res.on('end', () => resolve({ success: true })); }
-      );
-      req.on('error', () => resolve({ success: false }));
-      req.setTimeout(4000, () => { req.destroy(); resolve({ success: false }); });
-      req.end();
-    } catch { resolve({ success: false }); }
-  });
-});
-
-/* Load tiktok.com's own search page in a hidden window and scrape the video
- * grid — gives the exact same videos TikTok shows, unlike the TikWM API. */
-ipcMain.handle('tiktok:searchViaPage', async (_evt, query) => {
-  const ses = session.fromPartition(TT_SESSION_PARTITION);
-  await injectCookiesFromFileToSession(getTtCookiesFilePath(), ses);
-
-  const win = new BrowserWindow({
-    show: false,
-    width: 1280,
-    height: 900,
-    webPreferences: {
-      partition: TT_SESSION_PARTITION,
-      contextIsolation: true,
-      nodeIntegration: false,
-      offscreen: false,
-    },
-  });
-
-  try {
-    const url = `https://www.tiktok.com/search/video?q=${encodeURIComponent(query)}`;
-    await win.loadURL(url);
-
-    // TikTok hydrates slower than Instagram.
-    await new Promise((r) => setTimeout(r, 4000));
-
-    const MAX_SCROLLS = 60;
-    const STAGNANT_LIMIT = 4;
-    let stagnant = 0;
-    let lastCount = 0;
-    for (let i = 0; i < MAX_SCROLLS; i++) {
-      try {
-        await win.webContents.executeJavaScript('window.scrollTo(0, document.body.scrollHeight);');
-      } catch { break; }
-      await new Promise((r) => setTimeout(r, 1800));
-      let currentCount = 0;
-      try {
-        currentCount = await win.webContents.executeJavaScript(
-          'document.querySelectorAll(\'a[href*="/video/"]\').length'
-        );
-      } catch { break; }
-      if (currentCount <= lastCount) {
-        stagnant++;
-        if (stagnant >= STAGNANT_LIMIT) break;
-      } else {
-        stagnant = 0;
-        lastCount = currentCount;
-      }
-    }
-
-    // Attribute-based scrape only — TikTok's CSS class names are hashed and
-    // rotate per deploy, so we key off the canonical /@user/video/<id> href.
-    const results = await win.webContents.executeJavaScript(`
-      (() => {
-        const seen = new Set();
-        const out = [];
-        for (const a of document.querySelectorAll('a[href*="/video/"]')) {
-          const href = a.getAttribute('href') || '';
-          const m = href.match(/\\/@([^/]+)\\/video\\/(\\d+)/);
-          if (!m) continue;
-          const user = m[1];
-          const id = m[2];
-          if (seen.has(id)) continue;
-          seen.add(id);
-          const img = a.querySelector('img');
-          const card = a.closest('div');
-          const cap = (a.getAttribute('title') || (img && img.alt) || (card && card.innerText) || '').trim().slice(0, 200);
-          out.push({
-            id,
-            author: user,
-            url: 'https://www.tiktok.com/@' + user + '/video/' + id,
-            thumbnail: img ? (img.src || img.getAttribute('data-src') || '') : '',
-            title: cap,
-          });
-        }
-        return out;
-      })();
-    `);
-
-    return { success: true, results, scrolls: lastCount };
-  } catch (e) {
-    return { success: false, error: e.message };
-  } finally {
-    try { win.close(); } catch {}
-  }
-});
 
 /* ─── Manual cookies.txt import (workaround for Chrome 127+ DPAPI lock) ────
  * Chrome on Windows 127+ encrypts its cookie DB with a key tied to the user's
@@ -1588,13 +1090,10 @@ function getDataDir() {
   return path.join(app.getPath('userData'), 'data');
 }
 
-/* ─── Instagram API fetch via Electron's Chromium network stack ──────────
- * Node's https module gets blocked by Instagram's CDN because its TLS
- * fingerprint is identifiable as non-browser. Electron's net.fetch uses
- * Chromium's network stack, so the request looks like a real Chrome session.
- * We inject the imported cookies file into the persist:instagram session,
- * then fetch with that session.
- */
+/* ─── Seeding a popup's session from an imported cookies file ────────────
+ * A cookies.txt exported from the user's browser is how a login gets into a
+ * platform's partition without them typing it again — and the same file is
+ * what yt-dlp reads for gated posts. */
 async function injectCookiesFromFileToSession(filePath, ses) {
   if (!fs.existsSync(filePath)) return 0;
   // Always re-inject — the imported cookies are the source of truth and the
@@ -1635,137 +1134,7 @@ async function injectCookiesFromFileToSession(filePath, ses) {
   return added;
 }
 
-ipcMain.handle('instagram:apiFetch', async (_evt, urlStr) => {
-  const ses = session.fromPartition(IG_SESSION_PARTITION);
-  await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
-  const cookies = await ses.cookies.get({ domain: '.instagram.com' });
-  const cookieMap = Object.fromEntries(cookies.map((c) => [c.name, c.value]));
 
-  const { net } = require('electron');
-  try {
-    // Use the session's own fetch — it handles cookies + TLS like a real
-    // browser tab. Avoid forbidden headers (Sec-Fetch-*, Cookie, Referer,
-    // Accept-Encoding) because Chromium sets those itself; passing them
-    // triggers ERR_INVALID_ARGUMENT.
-    const response = await net.fetch(urlStr, {
-      method: 'GET',
-      session: ses,
-      credentials: 'include',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
-        'X-IG-App-ID': '936619743392459',
-        'X-ASBD-ID': '129477',
-        'X-IG-WWW-Claim': '0',
-        'X-Requested-With': 'XMLHttpRequest',
-        'X-CSRFToken': cookieMap.csrftoken || '',
-      },
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      return { success: false, status: response.status, error: text.slice(0, 300) };
-    }
-    try { return { success: true, data: JSON.parse(text) }; }
-    catch { return { success: false, error: 'Non-JSON: ' + text.slice(0, 300) }; }
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-/* ─── Last-resort: real-browser search ──────────────────────────────────
- * Instagram's API endpoints return "Oops, an error occurred" to programmatic
- * callers even with valid cookies — they fingerprint the request shape.
- * The reliable workaround is to load Instagram's actual search page in a
- * hidden Electron window (same session, real Chromium render) and scrape
- * the rendered DOM. From Instagram's view this looks identical to a user
- * scrolling the search tab in their browser.
- */
-ipcMain.handle('instagram:searchViaPage', async (_evt, query) => {
-  const ses = session.fromPartition(IG_SESSION_PARTITION);
-  await injectCookiesFromFileToSession(getCookiesFilePath(), ses);
-
-  const win = new BrowserWindow({
-    show: false,
-    width: 1280,
-    height: 900,
-    webPreferences: {
-      partition: IG_SESSION_PARTITION,
-      contextIsolation: true,
-      nodeIntegration: false,
-      offscreen: false,
-    },
-  });
-
-  try {
-    const url = `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(query)}`;
-    await win.loadURL(url);
-
-    // Initial render
-    await new Promise((r) => setTimeout(r, 3500));
-
-    // Keep scrolling until Instagram stops loading new items. We give it up
-    // to 60 scrolls (~90s) and stop early after 4 consecutive scrolls that
-    // produce no new anchors (Instagram is out of results for this query).
-    const MAX_SCROLLS = 60;
-    const STAGNANT_LIMIT = 4;
-    let stagnant = 0;
-    let lastCount = 0;
-    for (let i = 0; i < MAX_SCROLLS; i++) {
-      try {
-        await win.webContents.executeJavaScript('window.scrollTo(0, document.body.scrollHeight);');
-      } catch { break; }
-      await new Promise((r) => setTimeout(r, 1500));
-      let currentCount = 0;
-      try {
-        currentCount = await win.webContents.executeJavaScript(
-          'document.querySelectorAll(\'a[href*="/reel/"], a[href*="/p/"]\').length'
-        );
-      } catch { break; }
-      if (currentCount <= lastCount) {
-        stagnant++;
-        if (stagnant >= STAGNANT_LIMIT) break;
-      } else {
-        stagnant = 0;
-        lastCount = currentCount;
-      }
-    }
-
-    // Scrape both /reel/ and /p/ anchors. Instagram's keyword-search page
-    // actually puts the bulk of its reels under /p/ URLs even though they're
-    // video posts. We keep both in the listing; the yt-dlp side has a
-    // --match-filter "duration>0" that auto-skips any /p/ items that turn
-    // out to be photo carousels.
-    const results = await win.webContents.executeJavaScript(`
-      (() => {
-        const seen = new Set();
-        const out = [];
-        for (const a of document.querySelectorAll('a[href*="/reel/"], a[href*="/p/"]')) {
-          const m = a.getAttribute('href').match(/\\/(reel|p)\\/([^/?]+)/);
-          if (!m) continue;
-          const key = m[2];
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const img = a.querySelector('img');
-          out.push({
-            id: key,
-            kind: m[1],
-            url: 'https://www.instagram.com/' + m[1] + '/' + key + '/',
-            thumbnail: img ? img.src : '',
-            alt: img ? (img.alt || '') : '',
-          });
-        }
-        return out;
-      })();
-    `);
-
-    return { success: true, results, scrolls: lastCount };
-  } catch (e) {
-    return { success: false, error: e.message };
-  } finally {
-    try { win.close(); } catch {}
-  }
-});
 
 ipcMain.handle('cookies:import', async (_evt, platform) => {
   if (platform !== 'instagram' && platform !== 'facebook' && platform !== 'tiktok' && platform !== 'pinterest') {
