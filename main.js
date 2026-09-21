@@ -534,12 +534,6 @@ async function isTiktokLoggedIn() {
   return cookies.length > 0 && !!cookies[0].value;
 }
 
-ipcMain.handle('tiktok:status', async () => {
-  const loggedIn = await isTiktokLoggedIn();
-  const file = getTtCookiesFilePath();
-  return { loggedIn, cookiesFile: fs.existsSync(file) ? file : null };
-});
-
 // Opens TikTok's own login page in our session partition and resolves once
 // the cookie jar actually has a sessionid. Shared by the settings button and
 // by the "log in again" rescue on the empty-results notice.
@@ -585,15 +579,6 @@ function openTiktokLoginWindow() {
     loginWin.loadURL(TT_LOGIN_URL);
   });
 }
-
-ipcMain.handle('tiktok:login', async () => openTiktokLoginWindow());
-
-ipcMain.handle('tiktok:logout', async () => {
-  const ses = session.fromPartition(TT_SESSION_PARTITION);
-  await ses.clearStorageData({ storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers'] });
-  try { fs.unlinkSync(getTtCookiesFilePath()); } catch {}
-  return { success: true };
-});
 
 /* Auto-login: pull the TikTok session straight from whatever browser the user
  * is already logged into, via yt-dlp's --cookies-from-browser. We try the
@@ -664,8 +649,6 @@ async function autoPullTiktokCookiesFromBrowser() {
   };
 }
 
-ipcMain.handle('tiktok:cookiesFromBrowser', async () => autoPullTiktokCookiesFromBrowser());
-
 // Pull the TikTok login from the browser automatically, at most once per app
 // run, but only when we're not already logged in. Fired on startup and right
 // before the search window opens, so the user never has to click "login".
@@ -718,62 +701,6 @@ async function isPinterestLoggedIn() {
   const cookies = await ses.cookies.get({ domain: '.pinterest.com', name: '_pinterest_sess' });
   return cookies.length > 0 && !!cookies[0].value;
 }
-
-ipcMain.handle('pinterest:status', async () => {
-  const loggedIn = await isPinterestLoggedIn();
-  const file = getPinterestCookiesFilePath();
-  return { loggedIn, cookiesFile: fs.existsSync(file) ? file : null };
-});
-
-ipcMain.handle('pinterest:login', async () => {
-  return new Promise((resolve) => {
-    const loginWin = new BrowserWindow({
-      width: 520,
-      height: 720,
-      title: 'تسجيل الدخول إلى Pinterest',
-      parent: mainWin || undefined,
-      modal: !!mainWin,
-      autoHideMenuBar: true,
-      webPreferences: {
-        partition: PIN_SESSION_PARTITION,
-        contextIsolation: true,
-        nodeIntegration: false,
-      },
-    });
-
-    let finalized = false;
-    async function finalize(success) {
-      if (finalized) return;
-      finalized = true;
-      const result = success ? await persistPinterestCookies() : { saved: 0, file: null };
-      try { loginWin.close(); } catch {}
-      resolve({ success, ...result });
-    }
-
-    // Pinterest redirects away from /login (to / or /<user>) after login.
-    loginWin.webContents.on('did-navigate', async (_evt, url) => {
-      try {
-        const u = new URL(url);
-        if (/pinterest\.com$/i.test(u.hostname) && !/\/login\/?/i.test(u.pathname)) {
-          if (await isPinterestLoggedIn()) finalize(true);
-        }
-      } catch {}
-    });
-    loginWin.webContents.on('did-navigate-in-page', async () => {
-      if (await isPinterestLoggedIn()) finalize(true);
-    });
-    loginWin.on('closed', () => finalize(finalized));
-
-    loginWin.loadURL(PIN_LOGIN_URL);
-  });
-});
-
-ipcMain.handle('pinterest:logout', async () => {
-  const ses = session.fromPartition(PIN_SESSION_PARTITION);
-  await ses.clearStorageData({ storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers'] });
-  try { fs.unlinkSync(getPinterestCookiesFilePath()); } catch {}
-  return { success: true };
-});
 
 /* ─── The user agents the popups wear ────────────────────────────────────── */
 

@@ -32,17 +32,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openAdLibrary: (opts) => ipcRenderer.invoke('facebook:openAdLibrary', opts),
     onAdLibDownload: (cb) => ipcRenderer.on('fb-adlib:download', (_e, data) => cb(data)),
   },
-  tiktok: {
-    status: () => ipcRenderer.invoke('tiktok:status'),
-    login: () => ipcRenderer.invoke('tiktok:login'),
-    logout: () => ipcRenderer.invoke('tiktok:logout'),
-    cookiesFromBrowser: () => ipcRenderer.invoke('tiktok:cookiesFromBrowser'),
-  },
-  pinterest: {
-    status: () => ipcRenderer.invoke('pinterest:status'),
-    login: () => ipcRenderer.invoke('pinterest:login'),
-    logout: () => ipcRenderer.invoke('pinterest:logout'),
-  },
+  // TikTok and Pinterest have no login screen of their own here: you log in
+  // inside their popup, or the toolbar's «سجّل دخول من جديد» resets the
+  // session for you. Nothing to expose.
   // Manual cookies.txt import — workaround for the Chrome 127+ DPAPI lock.
   cookies: {
     import: (platform) => ipcRenderer.invoke('cookies:import', platform),

@@ -1052,30 +1052,6 @@
     } catch (e) { /* ignore */ }
   }
 
-  async function refreshTiktokLoginStatus() {
-    if (!window.electronAPI?.tiktok) return;
-    const statusEl = document.getElementById('tiktok-login-status');
-    const loginBtn = document.getElementById('tiktok-login-btn');
-    const logoutBtn = document.getElementById('tiktok-logout-btn');
-    if (!statusEl) return;
-    try {
-      const { loggedIn, cookiesFile } = await window.electronAPI.tiktok.status();
-      if (loggedIn) {
-        statusEl.textContent = 'مسجل دخول TikTok ✓';
-        if (loginBtn) loginBtn.textContent = 'إعادة تسجيل دخول';
-        if (logoutBtn) logoutBtn.style.display = '';
-      } else if (cookiesFile) {
-        statusEl.textContent = 'كوكيز مستوردة ✓ — جاهز للبحث';
-        if (loginBtn) loginBtn.textContent = 'تسجيل دخول TikTok';
-        if (logoutBtn) logoutBtn.style.display = '';
-      } else {
-        statusEl.textContent = 'مش مسجل دخول (البحث بيشتغل برضه)';
-        if (loginBtn) loginBtn.textContent = 'تسجيل دخول TikTok';
-        if (logoutBtn) logoutBtn.style.display = 'none';
-      }
-    } catch (e) { /* ignore */ }
-  }
-
   function bindCookieImportButtons() {
     function wireImport(btnId, platform, onDone) {
       const btn = document.getElementById(btnId);
@@ -1102,7 +1078,6 @@
     }
     wireImport('ig-import-btn', 'instagram', refreshInstagramLoginStatus);
     wireImport('fb-import-btn', 'facebook', refreshFacebookLoginStatus);
-    wireImport('tiktok-import-btn', 'tiktok', refreshTiktokLoginStatus);
   }
 
   function bindFacebookLoginButtons() {
@@ -1135,63 +1110,6 @@
       });
     }
   }
-
-  function bindTiktokLoginButtons() {
-    const loginBtn = document.getElementById('tiktok-login-btn');
-    const logoutBtn = document.getElementById('tiktok-logout-btn');
-    const autoBtn = document.getElementById('tiktok-autobrowser-btn');
-    if (autoBtn) {
-      autoBtn.addEventListener('click', async () => {
-        if (!window.electronAPI?.tiktok?.cookiesFromBrowser) return;
-        autoBtn.disabled = true;
-        const original = autoBtn.textContent;
-        autoBtn.textContent = 'بيسحب من المتصفح...';
-        try {
-          const r = await window.electronAPI.tiktok.cookiesFromBrowser();
-          if (r?.success) {
-            toast(`اتسحب الدخول من ${r.browser} ✓ — جاهز للبحث`, 'success', 6000);
-          } else if (r?.hint === 'app-bound' || /DPAPI|decrypt/i.test(r?.error || '')) {
-            toast('Chrome/Edge بيشفّر الكوكيز ومينفعش نقراها تلقائي. الحل: «تسجيل دخول TikTok» يدوي مرة (بالباسورد أو QR)، أو استخدم Firefox، أو «استيراد كوكيز». بس جرّب تبحث الأول — غالباً مش محتاج تسجيل أصلاً.', 'warning', 12000);
-          } else {
-            toast(r?.error || 'مقدرناش نسحب الدخول. جرّب تبحث من غير تسجيل', 'error', 8000);
-          }
-        } catch (e) {
-          toast(e?.message || 'فشل السحب من المتصفح', 'error');
-        } finally {
-          autoBtn.disabled = false;
-          autoBtn.textContent = original;
-          refreshTiktokLoginStatus();
-        }
-      });
-    }
-    if (loginBtn) {
-      loginBtn.addEventListener('click', async () => {
-        if (!window.electronAPI?.tiktok) return;
-        loginBtn.disabled = true;
-        loginBtn.textContent = 'جاري الفتح...';
-        try {
-          const res = await window.electronAPI.tiktok.login();
-          if (res?.success) toast('تم تسجيل الدخول بنجاح', 'success');
-          else toast('لم يتم تسجيل الدخول', 'warning');
-        } catch (e) {
-          toast(e?.message || 'خطأ في فتح نافذة تسجيل الدخول', 'error');
-        } finally {
-          loginBtn.disabled = false;
-          refreshTiktokLoginStatus();
-        }
-      });
-    }
-    if (logoutBtn) {
-      logoutBtn.addEventListener('click', async () => {
-        if (!window.electronAPI?.tiktok) return;
-        if (!confirm('تسجيل خروج TikTok؟')) return;
-        await window.electronAPI.tiktok.logout();
-        toast('تم تسجيل الخروج', 'info');
-        refreshTiktokLoginStatus();
-      });
-    }
-  }
-
 
   // ─── Batch download (paste many links → one folder) ──────────────────
   // Whatever the server reports as its own download folder. This used to be
@@ -1712,7 +1630,6 @@
     bindEmbedDownloads();
     bindInstagramLoginButtons();
     bindFacebookLoginButtons();
-    bindTiktokLoginButtons();
     bindAdLibrary();
     bindBatchModal();
     bindCookieImportButtons();
