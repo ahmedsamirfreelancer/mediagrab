@@ -13,7 +13,7 @@ app.setName('MediaGrab');
 let serverProcess = null;
 let mainWin = null;
 
-const SERVER_PORT = 3456;
+const SERVER_PORT = Number(process.env.MG_PORT) || 3456;
 
 // MediaGrab is free: no serial, no activation screen, no license server.
 // The one thing kept from that era is a stable per-machine id, used only to

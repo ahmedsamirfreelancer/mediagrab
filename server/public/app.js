@@ -41,7 +41,6 @@
 
   const dom = {
     mainInput: $('#main-input'),
-    pasteBtn: $('#paste-btn'),
     goBtn: $('#go-btn'),
     goLabel: $('#go-label'),
     launchHint: $('#launch-hint'),
@@ -52,6 +51,13 @@
     subfolderInput: $('#subfolder-input'),
     folderPath: $('#folder-path'),
     launcher: $('#launcher'),
+    menuBtn: $('#menu-btn'),
+    menu: $('#menu'),
+    statsMenuLabel: $('#stats-menu-label'),
+    folderChip: $('#folder-chip'),
+    folderChipName: $('#folder-chip-name'),
+    adlibMenuBtn: $('#adlib-menu-btn'),
+    adlibBackBtn: $('#adlib-back-btn'),
     adlibSection: $('#adlib-section'),
     statsBtn: $('#stats-btn'),
     statsModal: $('#stats-modal'),
@@ -365,8 +371,8 @@
   function go() {
     const text = (dom.mainInput.value || '').trim();
     if (!text) {
-      const p = PLATFORMS[state.platform];
-      return toast(p && p.ask ? p.ask : 'اكتب حاجة الأول', 'warning');
+      dom.mainInput.focus();
+      return toast('الصق لينك فيديو أو اكتب كلمة بحث', 'warning');
     }
     if (!isValidUrl(text)) return openPopup(state.platform, { query: text });
 
@@ -387,46 +393,53 @@
     const text = (dom.mainInput.value || '').trim();
     const link = isValidUrl(text);
     const key = link ? (detectPlatform(text) || state.platform) : state.platform;
-    const willDownload = link && isSinglePost(key, text);
+    const willDownload = !text || (link && isSinglePost(key, text));
     dom.goLabel.textContent = willDownload ? 'نزّل' : 'افتح';
     dom.goBtn.classList.toggle('is-download', willDownload);
-    dom.launchHint.textContent = willDownload
-      ? `لينك فيديو من ${platformName(key)} — هينزّل على طول`
-      : link
-        ? `هنفتح الصفحة دي في شباك ${platformName(key)} وعليها أزرار تحميل`
-        : 'لينك فيديو جاهز بينزّل على طول · أي كلمة تانية بتفتح الموقع';
+    dom.launchHint.textContent = !text ? ''
+      : willDownload ? `لينك فيديو من ${platformName(key)} — هينزّل على طول`
+        : link ? `هنفتح الصفحة دي في شباك ${platformName(key)} وعليها أزرار تحميل`
+          : `هنبحث في ${platformName(key)} — دوس على أي شارة تحت عشان تغيّر الموقع`;
   }
 
-  // ─── Platform tabs ──────────────────────────────────
-  function switchPlatform(key) {
+  // ─── Platforms ──────────────────────────────────────
+  // No tabs: a link finds its own platform. The badges open a site in its own
+  // window (with the box's text as the search, if any) and the last one used
+  // is where a bare word goes.
+  function selectPlatform(key) {
     state.platform = key;
-    $$('.platform-tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.platform === key));
-
-    // The Ad Library has its own filter panel instead of the launcher box.
-    const isAdLib = key === 'adlibrary';
-    if (dom.launcher) dom.launcher.style.display = isAdLib ? 'none' : '';
-    if (dom.adlibSection) dom.adlibSection.style.display = isAdLib ? '' : 'none';
-    if (isAdLib) refreshFacebookLoginStatus();
-
     const p = PLATFORMS[key] || {};
-    if (dom.launchPlatform) dom.launchPlatform.textContent = p.name || key;
+    $$('.badge').forEach((b) => b.classList.toggle('active', b.dataset.platform === key));
     if (dom.openHomeLabel) dom.openHomeLabel.textContent = `افتح ${p.name || key} من غير بحث`;
-    if (dom.mainInput) dom.mainInput.placeholder = `لينك فيديو — أو ${p.ask || 'اكتب اللي بتدوّر عليه'}`;
-
-    // Facebook is the one platform whose login we still manage from here: its
-    // video search is empty without one.
-    const fbBanner = document.getElementById('fb-login-banner');
-    if (fbBanner) {
-      const show = key === 'facebook' && !!(window.electronAPI && window.electronAPI.facebook);
-      fbBanner.style.display = show ? 'flex' : 'none';
-      if (show) refreshFacebookLoginStatus();
-    }
-    // Instagram mirrors TikTok: no banner here, you log in inside the window.
-    const igBanner = document.getElementById('ig-login-banner');
-    if (igBanner) igBanner.style.display = 'none';
-
     updateGoButton();
-    updateFolderUI();
+  }
+
+  function onBadge(key) {
+    selectPlatform(key);
+    const text = (dom.mainInput.value || '').trim();
+    if (!text) return openPopup(key);
+    openPopup(key, isValidUrl(text) ? { url: text } : { query: text });
+  }
+
+  // The Ad Library has its own filter panel instead of the launcher box.
+  function showAdLib(on) {
+    if (dom.launcher) dom.launcher.style.display = on ? 'none' : '';
+    if (dom.adlibSection) dom.adlibSection.style.display = on ? '' : 'none';
+    if (on) refreshFacebookLoginStatus();
+  }
+
+  function toggleMenu(open) {
+    const show = open === undefined ? dom.menu.classList.contains('hidden') : open;
+    dom.menu.classList.toggle('hidden', !show);
+    dom.menuBtn.setAttribute('aria-expanded', String(show));
+    if (show) refreshTodayCount();
+  }
+
+  async function refreshTodayCount() {
+    try {
+      const s = await (await fetch('/api/stats')).json();
+      dom.statsMenuLabel.textContent = `نزّلت النهارده: ${s.todayCount || 0}`;
+    } catch (e) { console.warn('[ui] stats', e); }
   }
 
   /* ─── What the popups send back ───────────────────────────────────────────
@@ -491,6 +504,10 @@
 
   function updateFolderUI() {
     if (!dom.folderPath) return;
+    if (dom.folderChipName) {
+      const baseName = (state.settings.outputDir || state.env.defaultOutputDir || '').split(/[\\/]/).filter(Boolean).pop() || 'التنزيلات';
+      dom.folderChipName.textContent = getCurrentSubfolder() || baseName;
+    }
     const base = state.settings.outputDir || state.env.defaultOutputDir || '';
     const sub = getCurrentSubfolder();
     const sep = state.env.sep || '\\';
@@ -844,6 +861,7 @@
       (q) => q.status === 'downloading' || q.status === 'queued'
     ).length;
     dom.queueCount.textContent = active > 0 ? `${active} نشط` : '';
+    if (dom.stopAllBtn) dom.stopAllBtn.classList.toggle('hidden', active === 0);
     const hasItems = dom.queueList.querySelectorAll('.queue-item').length > 0;
     dom.queueEmpty.classList.toggle('hidden', hasItems);
   }
@@ -872,7 +890,7 @@
     const labels = {
       queued: 'في الانتظار',
       downloading: 'يحمّل',
-      completed: 'مكتمل',
+      completed: '✓ تم',
       error: 'خطأ',
       cancelled: 'أُلغي',
     };
@@ -1365,26 +1383,34 @@
 
   // ─── Events ─────────────────────────────────────────
   function initEvents() {
-    $$('.platform-tab').forEach((tab) => {
-      tab.addEventListener('click', () => switchPlatform(tab.dataset.platform));
+    $$('.badge').forEach((b) => b.addEventListener('click', () => onBadge(b.dataset.platform)));
+
+    dom.menuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
+    dom.menu.addEventListener('click', () => toggleMenu(false));
+    document.addEventListener('click', (e) => {
+      if (!dom.menu.contains(e.target) && e.target !== dom.menuBtn) toggleMenu(false);
     });
+    dom.adlibMenuBtn.addEventListener('click', () => showAdLib(true));
+    dom.adlibBackBtn.addEventListener('click', () => showAdLib(false));
+
+    // «بينزّل في» — one press turns the name into a box to type in.
+    dom.folderChip.addEventListener('click', () => {
+      dom.folderChip.classList.add('hidden');
+      dom.subfolderInput.classList.remove('hidden');
+      dom.subfolderInput.focus();
+    });
+    const closeFolderEdit = () => {
+      dom.subfolderInput.classList.add('hidden');
+      dom.folderChip.classList.remove('hidden');
+      updateFolderUI();
+    };
+    dom.subfolderInput.addEventListener('blur', closeFolderEdit);
+    dom.subfolderInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') closeFolderEdit(); });
 
     dom.goBtn.addEventListener('click', go);
     dom.mainInput.addEventListener('input', updateGoButton);
     dom.mainInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); go(); }
-    });
-
-    dom.pasteBtn.addEventListener('click', async () => {
-      try {
-        const text = await navigator.clipboard.readText();
-        if (!text) return toast('الحافظة فاضية', 'warning');
-        dom.mainInput.value = text.trim();
-        updateGoButton();
-        dom.mainInput.focus();
-      } catch {
-        toast('مقدرناش نقرا الحافظة — الزق بإيدك', 'warning');
-      }
     });
 
     if (dom.openHomeBtn) {
@@ -1418,6 +1444,8 @@
       applySettingsToForm();
       refreshYtdlpSection();
       refreshAppUpdateSection();
+      refreshInstagramLoginStatus();
+      refreshFacebookLoginStatus();
       dom.settingsModal.classList.remove('hidden');
     });
     dom.settingsClose.addEventListener('click', () => dom.settingsModal.classList.add('hidden'));
@@ -1468,6 +1496,7 @@
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
+      toggleMenu(false);
       for (const m of $$('.modal-overlay')) m.classList.add('hidden');
     });
   }
@@ -1635,15 +1664,7 @@
     bindCookieImportButtons();
     bindYtdlpButtons();
     bindAppUpdateButtons();
-    switchPlatform('tiktok');
-
-    // The real app version in the header badge, so it never goes stale.
-    if (window.electronAPI && window.electronAPI.app && window.electronAPI.app.version) {
-      window.electronAPI.app.version().then((v) => {
-        const el = document.getElementById('version-badge');
-        if (el && v) el.textContent = 'v' + v;
-      }).catch(() => {});
-    }
+    selectPlatform('tiktok');
 
     setTimeout(checkInterrupted, 1500);
   }

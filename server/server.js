@@ -17,7 +17,7 @@ const app = express();
 const server = http.createServer(app);
 
 // ─── Config ────────────────────────────────────────────────────────────────────
-const PORT = 3456;
+const PORT = Number(process.env.MG_PORT) || 3456;
 const DEFAULT_OUTPUT_DIR = path.join(
   process.env.USERPROFILE || os.homedir(),
   'Downloads',
@@ -764,7 +764,7 @@ function buildYtdlpFormat(quality) {
   if (quality === '720')  return 'bestvideo[height<=720]+bestaudio/best[height<=720]';
   if (quality === '480')  return 'bestvideo[height<=480]+bestaudio/best[height<=480]';
   if (quality === '360')  return 'bestvideo[height<=360]+bestaudio/best[height<=360]';
-  return 'best[ext=mp4]/best';
+  return 'best[ext=mp4]/bestvideo+bestaudio/best';
 }
 
 const YTDLP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
