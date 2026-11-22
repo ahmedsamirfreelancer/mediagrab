@@ -9,6 +9,8 @@ const { registerEmbeds, openEmbed } = require('./embed/windows');
 // package.json) while the installer uses %APPDATA%/MediaGrab (productName),
 // so dev mode wouldn't see the cookies/settings the installed copy already has.
 app.setName('MediaGrab');
+// A fixed id makes Windows keep the taskbar/Start icon tied to this app (and refresh it).
+if (process.platform === 'win32') app.setAppUserModelId('com.arqami.mediagrab');
 
 let serverProcess = null;
 let mainWin = null;
@@ -1080,7 +1082,7 @@ ipcMain.handle('cookies:import', async (_evt, platform) => {
   }
   const platLabel = platform === 'instagram' ? 'Instagram' : platform === 'facebook' ? 'Facebook' : platform === 'pinterest' ? 'Pinterest' : 'TikTok';
   const result = await dialog.showOpenDialog(mainWin || undefined, {
-    title: `اختر ملف كوكيز ${platLabel}`,
+    title: `اختر ملف Cookies ${platLabel}`,
     properties: ['openFile'],
     filters: [{ name: 'Cookies', extensions: ['txt'] }],
   });
@@ -1090,11 +1092,11 @@ ipcMain.handle('cookies:import', async (_evt, platform) => {
     const content = fs.readFileSync(src, 'utf8');
     // Sanity-check: Netscape cookies files start with this header.
     if (!/Netscape HTTP Cookie File/i.test(content)) {
-      return { success: false, error: 'الملف ده مش Netscape cookies.txt. صدّره من الـ extension تاني.' };
+      return { success: false, error: 'الملف ده مش مظبوط' };
     }
     const domainNeedle = platform === 'instagram' ? 'instagram.com' : platform === 'facebook' ? 'facebook.com' : platform === 'pinterest' ? 'pinterest.com' : 'tiktok.com';
     if (!new RegExp(domainNeedle, 'i').test(content)) {
-      return { success: false, error: `الملف مفيهوش كوكيز ${domainNeedle}.` };
+      return { success: false, error: `الملف مفيهوش Cookies ${domainNeedle}.` };
     }
     const destDir = getDataDir();
     fs.mkdirSync(destDir, { recursive: true });

@@ -1,10 +1,10 @@
-﻿"""Generates the MediaGrab brand mark (download arrow into a tray, violet gradient squircle).
+"""Generates the MediaGrab brand mark (download arrow into a tray, coral gradient squircle).
 Run: python scripts/make-icons.py  -> build/icon.png|ico, installer BMPs, server/public/icon.png|favicon.png, android mipmaps."""
 import os, sys
 from PIL import Image, ImageDraw, ImageFilter
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 S = 1024
-C1, C2 = (124, 92, 255), (168, 85, 247)
+C1, C2 = (255, 122, 69), (229, 83, 45)
 
 def arrow(d, scale=1.0, ox=0, oy=0, w=96, color=(255, 255, 255, 255)):
     def p(x, y): return (ox + (S/2 + (x - S/2) * scale), oy + (S/2 + (y - S/2) * scale))

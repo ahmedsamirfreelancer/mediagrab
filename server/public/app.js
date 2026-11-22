@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MediaGrab — Client
  *
  * The app is a launcher and a download queue, nothing else. It never renders
@@ -45,15 +45,12 @@
     goLabel: $('#go-label'),
     launchHint: $('#launch-hint'),
     launchPlatform: $('#launch-platform'),
-    openHomeBtn: $('#open-home-btn'),
-    openHomeLabel: $('#open-home-label'),
     imgSearchBtn: $('#img-search-btn'),
     subfolderInput: $('#subfolder-input'),
     folderPath: $('#folder-path'),
     launcher: $('#launcher'),
     menuBtn: $('#menu-btn'),
     menu: $('#menu'),
-    statsMenuLabel: $('#stats-menu-label'),
     folderChip: $('#folder-chip'),
     folderChipName: $('#folder-chip-name'),
     adlibMenuBtn: $('#adlib-menu-btn'),
@@ -62,19 +59,6 @@
     folderSuggest: $('#folder-suggest'),
     adlibBackBtn: $('#adlib-back-btn'),
     adlibSection: $('#adlib-section'),
-    statsBtn: $('#stats-btn'),
-    statsModal: $('#stats-modal'),
-    statsClose: $('#stats-close'),
-    statsBody: $('#stats-body'),
-    notesBtn: $('#notes-btn'),
-    notesModal: $('#notes-modal'),
-    notesClose: $('#notes-close'),
-    notesBody: $('#notes-body'),
-    notesInput: $('#notes-input'),
-    notesAddBtn: $('#notes-add-btn'),
-    notesProgress: $('#notes-progress'),
-    notesClearDone: $('#notes-clear-done'),
-    notesClearAll: $('#notes-clear-all'),
     queueList: $('#queue-list'),
     queueCount: $('#queue-count'),
     queueEmpty: $('#queue-empty'),
@@ -215,7 +199,7 @@
 
     socket.on('download:error', (data) => {
       updateQueueItem(data.id, { status: 'error', error: data.error });
-      toast(`فشل: ${truncate(data.error || 'خطأ غير معروف', 80)}`, 'error');
+      toast('التحميل ماكملش — جرّب تاني', 'error');
       onTaskFinished(data.id, 'error');
     });
 
@@ -278,7 +262,7 @@
       });
     } catch (err) {
       updateQueueItem(id, { status: 'error', error: err.message });
-      toast(err.message, 'error');
+      toast('حصلت مشكلة — جرّب تاني', 'error');
     }
   }
 
@@ -327,7 +311,7 @@
       toast(`بدأنا ${enriched.length} تحميل`, 'info');
     } catch (err) {
       enriched.forEach((it) => updateQueueItem(it.id, { status: 'error', error: err.message }));
-      toast(err.message, 'error');
+      toast('حصلت مشكلة — جرّب تاني', 'error');
     }
   }
 
@@ -366,7 +350,7 @@
     const api = window.electronAPI && window.electronAPI.embed;
     if (!api) return toast('فتح المواقع متاح في تطبيق سطح المكتب بس', 'warning');
     const r = await api.open(key, Object.assign({ base: currentBase() }, opts));
-    if (r && r.success === false) return toast(r.error || 'مقدرناش نفتح الموقع', 'error');
+    if (r && r.success === false) return toast('مقدرناش نفتح الموقع — اتأكد من النت', 'error');
     toast(`فتحنا ${platformName(key)} — دوس «تحميل» على أي حاجة`, 'info', 5000);
   }
 
@@ -518,7 +502,6 @@
     state.platform = key;
     const p = PLATFORMS[key] || {};
     $$('.badge').forEach((b) => b.classList.toggle('active', b.dataset.platform === key));
-    if (dom.openHomeLabel) dom.openHomeLabel.textContent = `افتح ${p.name || key} من غير بحث`;
     updateGoButton();
   }
 
@@ -540,14 +523,6 @@
     const show = open === undefined ? dom.menu.classList.contains('hidden') : open;
     dom.menu.classList.toggle('hidden', !show);
     dom.menuBtn.setAttribute('aria-expanded', String(show));
-    if (show) refreshTodayCount();
-  }
-
-  async function refreshTodayCount() {
-    try {
-      const s = await (await fetch('/api/stats')).json();
-      dom.statsMenuLabel.textContent = `نزّلت النهارده: ${s.todayCount || 0}`;
-    } catch (e) { console.warn('[ui] stats', e); }
   }
 
   /* ─── What the popups send back ───────────────────────────────────────────
@@ -656,142 +631,6 @@
   }
 
 
-  // ─── Product Notes (creatives checklist) ────────────
-  // قائمة بأسماء المنتجات اللي المستخدم هينزّل لها كرييتفات.
-  // كل منتج يتعلّم عليه ✓ بعد ما يتحمّل. محفوظة في localStorage فتفضل بعد قفل البرنامج.
-  const NOTES_KEY = 'mediagrab_product_notes';
-
-  function loadNotes() {
-    try { return JSON.parse(localStorage.getItem(NOTES_KEY)) || []; }
-    catch { return []; }
-  }
-  function saveNotes(list) {
-    try { localStorage.setItem(NOTES_KEY, JSON.stringify(list)); } catch {}
-  }
-
-  function openNotes() {
-    if (!dom.notesModal) return;
-    renderNotes();
-    dom.notesModal.classList.remove('hidden');
-    if (dom.notesInput) setTimeout(() => dom.notesInput.focus(), 50);
-  }
-
-  function addNote() {
-    const name = (dom.notesInput?.value || '').trim();
-    if (!name) return;
-    const list = loadNotes();
-    if (list.some((n) => n.name.toLowerCase() === name.toLowerCase())) {
-      toast('المنتج ده موجود في القائمة بالفعل', 'warning');
-      dom.notesInput.value = '';
-      return;
-    }
-    list.unshift({ id: 'n' + Date.now() + Math.floor(Math.random() * 1000), name, done: false, createdAt: Date.now() });
-    saveNotes(list);
-    dom.notesInput.value = '';
-    renderNotes();
-  }
-
-  function updateNote(id, patch) {
-    const list = loadNotes();
-    const item = list.find((n) => n.id === id);
-    if (!item) return;
-    Object.assign(item, patch);
-    saveNotes(list);
-    renderNotes();
-  }
-
-  function deleteNote(id) {
-    saveNotes(loadNotes().filter((n) => n.id !== id));
-    renderNotes();
-  }
-
-  function renderNotes() {
-    if (!dom.notesBody) return;
-    const list = loadNotes();
-    // المُحمّل ينزل تحت، والباقي بترتيب الإضافة (الأحدث فوق)
-    list.sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1));
-    const doneCount = list.filter((n) => n.done).length;
-
-    if (dom.notesProgress) {
-      dom.notesProgress.textContent = list.length
-        ? `اتحمّل ${doneCount} من ${list.length} منتج`
-        : '';
-    }
-
-    if (!list.length) {
-      dom.notesBody.innerHTML = '<div class="history-empty">لسه مفيش منتجات — اكتب اسم منتج فوق وضيفه</div>';
-      return;
-    }
-
-    dom.notesBody.innerHTML = '';
-    list.forEach((n) => {
-      const el = document.createElement('div');
-      el.className = 'note-item' + (n.done ? ' note-done' : '');
-      el.innerHTML = `
-        <label class="note-check" title="علّم لما تحمّل كرييتفات المنتج">
-          <input type="checkbox" ${n.done ? 'checked' : ''}>
-        </label>
-        <div class="note-name">${escapeHtml(n.name)}</div>
-        <div class="note-actions">
-          <button class="btn btn-secondary btn-sm note-search" title="ابحث عن المنتج ده دلوقتي"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg> ابحث</button>
-          <button class="icon-btn note-delete" title="حذف">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
-          </button>
-        </div>
-      `;
-      el.querySelector('input[type=checkbox]').addEventListener('change', (e) => {
-        updateNote(n.id, { done: e.target.checked });
-      });
-      el.querySelector('.note-search').addEventListener('click', () => {
-        dom.notesModal.classList.add('hidden');
-        dom.mainInput.value = n.name;
-        updateGoButton();
-        openPopup(state.platform, { query: n.name });
-      });
-      el.querySelector('.note-delete').addEventListener('click', () => deleteNote(n.id));
-      dom.notesBody.appendChild(el);
-    });
-  }
-
-
-  // ─── Stats panel ────────────────────────────────────
-  async function openStats() {
-    if (!dom.statsModal) return;
-    dom.statsBody.innerHTML = 'جاري التحميل...';
-    dom.statsModal.classList.remove('hidden');
-    try {
-      const r = await fetch('/api/stats');
-      const s = await r.json();
-      const fmt = (b) => b < 1024*1024 ? (b/1024).toFixed(1)+' KB'
-                       : b < 1024*1024*1024 ? (b/1024/1024).toFixed(1)+' MB'
-                       : (b/1024/1024/1024).toFixed(2)+' GB';
-      let html = `
-        <div class="stats-grid">
-          <div class="stat"><span class="stat-label">إجمالي التحميلات</span><span class="stat-value">${s.totalDownloads}</span></div>
-          <div class="stat"><span class="stat-label">اليوم</span><span class="stat-value">${s.todayCount}</span></div>
-          <div class="stat"><span class="stat-label">آخر أسبوع</span><span class="stat-value">${s.weekCount}</span></div>
-          <div class="stat"><span class="stat-label">إجمالي الحجم</span><span class="stat-value">${fmt(s.totalBytes)}</span></div>
-        </div>
-        <h3 style="margin-top:20px;font-size:0.95rem;">حسب المنصة</h3>
-        <div class="stats-grid">`;
-      for (const [p, c] of Object.entries(s.perPlatform || {})) {
-        html += `<div class="stat"><span class="stat-label">${escapeHtml(p)}</span><span class="stat-value">${c}</span></div>`;
-      }
-      html += `</div>`;
-      if (s.topAuthorsList?.length) {
-        html += `<h3 style="margin-top:20px;font-size:0.95rem;">أكثر القنوات تنزيلًا</h3><div class="top-authors">`;
-        for (const a of s.topAuthorsList) {
-          html += `<div class="author-row"><span>${escapeHtml(a.name)}</span><span class="author-count">${a.count}</span></div>`;
-        }
-        html += `</div>`;
-      }
-      dom.statsBody.innerHTML = html;
-    } catch (err) {
-      dom.statsBody.innerHTML = `فشل: ${escapeHtml(err.message)}`;
-    }
-  }
-
-
   // ─── Interrupted-queue restoration ──────────────────
   async function checkInterrupted() {
     try {
@@ -875,7 +714,7 @@
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       const cur = state.queue.get(item.id);
-      if (!cur?.filePath) return toast('لا يوجد ملف مرتبط', 'warning');
+      if (!cur?.filePath) return toast('الملف مش موجود', 'warning');
       if (!confirm(`حذف الملف من الجهاز؟\n${cur.filePath}`)) return;
       fetch('/api/file', {
         method: 'DELETE',
@@ -883,11 +722,11 @@
         body: JSON.stringify({ filePath: cur.filePath }),
       }).then((r) => r.json()).then((d) => {
         if (d.success) {
-          toast('تم الحذف', 'success');
+          toast('اتمسح', 'success');
           el.remove();
           state.queue.delete(item.id);
         } else {
-          toast(d.error || 'فشل الحذف', 'error');
+          toast('مقدرناش نمسحه', 'error');
         }
       });
     });
@@ -953,7 +792,7 @@
 
   function retryDownload(id) {
     const item = state.queue.get(id);
-    if (!item || !item.url) return toast('لا يمكن إعادة المحاولة (لا يوجد URL)', 'warning');
+    if (!item || !item.url) return toast('مقدرناش نعيد المحاولة — الصق اللينك تاني', 'warning');
     const el = dom.queueList.querySelector(`[data-queue-id="${cssEscape(id)}"]`);
     if (el) el.remove();
     state.queue.delete(id);
@@ -999,7 +838,7 @@
       queued: 'في الانتظار',
       downloading: 'يحمّل',
       completed: 'تم',
-      error: 'خطأ',
+      error: 'ماكملش',
       cancelled: 'أُلغي',
     };
     return labels[status] || status;
@@ -1016,15 +855,15 @@
     try {
       const { loggedIn, cookiesFile } = await window.electronAPI.instagram.status();
       if (loggedIn) {
-        statusEl.textContent = 'مسجل دخول Instagram';
+        statusEl.textContent = 'مسجّل ✓';
         if (loginBtn) loginBtn.textContent = 'إعادة تسجيل دخول';
         if (logoutBtn) logoutBtn.style.display = '';
       } else if (cookiesFile) {
-        statusEl.textContent = 'كوكيز مستوردة — جاهز للبحث';
+        statusEl.textContent = 'مسجّل ✓';
         if (loginBtn) loginBtn.textContent = 'تسجيل دخول Instagram';
         if (logoutBtn) logoutBtn.style.display = '';
       } else {
-        statusEl.textContent = 'مش مسجل دخول';
+        statusEl.textContent = 'مش مسجّل';
         if (loginBtn) loginBtn.textContent = 'تسجيل دخول Instagram';
         if (logoutBtn) logoutBtn.style.display = 'none';
       }
@@ -1163,47 +1002,19 @@
     try {
       const { loggedIn, cookiesFile } = await window.electronAPI.facebook.status();
       if (loggedIn) {
-        statusEl.textContent = 'مسجل دخول Facebook';
+        statusEl.textContent = 'مسجّل ✓';
         if (loginBtn) loginBtn.textContent = 'إعادة تسجيل دخول';
         if (logoutBtn) logoutBtn.style.display = '';
       } else if (cookiesFile) {
-        statusEl.textContent = 'كوكيز مستوردة — جاهز للبحث';
+        statusEl.textContent = 'مسجّل ✓';
         if (loginBtn) loginBtn.textContent = 'تسجيل دخول Facebook';
         if (logoutBtn) logoutBtn.style.display = '';
       } else {
-        statusEl.textContent = 'مش مسجل دخول';
+        statusEl.textContent = 'مش مسجّل';
         if (loginBtn) loginBtn.textContent = 'تسجيل دخول Facebook';
         if (logoutBtn) logoutBtn.style.display = 'none';
       }
     } catch (e) { /* ignore */ }
-  }
-
-  function bindCookieImportButtons() {
-    function wireImport(btnId, platform, onDone) {
-      const btn = document.getElementById(btnId);
-      if (!btn || !window.electronAPI?.cookies) return;
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        const original = btn.textContent;
-        btn.textContent = '...';
-        try {
-          const r = await window.electronAPI.cookies.import(platform);
-          if (r?.success) {
-            toast('تم استيراد الكوكيز', 'success');
-            if (onDone) onDone();
-          } else if (!r?.cancelled) {
-            toast(r?.error || 'فشل الاستيراد', 'error');
-          }
-        } catch (e) {
-          toast(e?.message || 'فشل الاستيراد', 'error');
-        } finally {
-          btn.disabled = false;
-          btn.textContent = original;
-        }
-      });
-    }
-    wireImport('ig-import-btn', 'instagram', refreshInstagramLoginStatus);
-    wireImport('fb-import-btn', 'facebook', refreshFacebookLoginStatus);
   }
 
   function bindFacebookLoginButtons() {
@@ -1216,10 +1027,10 @@
         loginBtn.textContent = 'جاري الفتح...';
         try {
           const res = await window.electronAPI.facebook.login();
-          if (res?.success) toast('تم تسجيل الدخول بنجاح', 'success');
-          else toast('لم يتم تسجيل الدخول', 'warning');
+          if (res?.success) toast('تمام، سجّلت دخول', 'success');
+          else toast('الدخول ما اتسجّلش', 'warning');
         } catch (e) {
-          toast(e?.message || 'خطأ في فتح نافذة تسجيل الدخول', 'error');
+          toast('مقدرناش نفتح نافذة الدخول', 'error');
         } finally {
           loginBtn.disabled = false;
           refreshFacebookLoginStatus();
@@ -1231,7 +1042,7 @@
         if (!window.electronAPI?.facebook) return;
         if (!confirm('تسجيل خروج Facebook؟')) return;
         await window.electronAPI.facebook.logout();
-        toast('تم تسجيل الخروج', 'info');
+        toast('خرجت من الحساب', 'info');
         refreshFacebookLoginStatus();
       });
     }
@@ -1308,7 +1119,7 @@
           const r = await apiCall('/next-subfolder', { outputDir: dir, prefix: '' });
           sub = r?.name || '';
         } catch (e) {
-          toast('متعرفناش نرقّم المجلد تلقائي: ' + (e?.message || 'خطأ'), 'warning');
+          toast('مقدرناش نرقّم الفولدر — اكتب اسمه بإيدك', 'warning');
         }
       }
 
@@ -1332,12 +1143,12 @@
         try {
           const res = await window.electronAPI.instagram.login();
           if (res?.success) {
-            toast('تم تسجيل الدخول بنجاح', 'success');
+            toast('تمام، سجّلت دخول', 'success');
           } else {
-            toast('لم يتم تسجيل الدخول', 'warning');
+            toast('الدخول ما اتسجّلش', 'warning');
           }
         } catch (e) {
-          toast(e?.message || 'خطأ في فتح نافذة تسجيل الدخول', 'error');
+          toast('مقدرناش نفتح نافذة الدخول', 'error');
         } finally {
           loginBtn.disabled = false;
           refreshInstagramLoginStatus();
@@ -1349,7 +1160,7 @@
         if (!window.electronAPI?.instagram) return;
         if (!confirm('تسجيل خروج Instagram؟')) return;
         await window.electronAPI.instagram.logout();
-        toast('تم تسجيل الخروج', 'info');
+        toast('خرجت من الحساب', 'info');
         refreshInstagramLoginStatus();
       });
     }
@@ -1396,11 +1207,11 @@
   // Open file — prefer Electron's shell.openPath (Unicode-safe). Falls back
   // to the legacy server endpoint if running outside Electron.
   function openDownloadedFile(filePath) {
-    if (!filePath) return toast('مسار الملف غير معروف', 'warning');
+    if (!filePath) return toast('مش لاقيين الملف', 'warning');
     if (window.electronAPI?.shell) {
       window.electronAPI.shell.openPath(filePath).then((d) => {
-        if (!d?.success) toast(d?.error || 'فشل فتح الملف', 'error');
-      }).catch(() => toast('فشل فتح الملف', 'error'));
+        if (!d?.success) toast('مقدرناش نفتح الملف', 'error');
+      }).catch(() => toast('مقدرناش نفتح الملف', 'error'));
       return;
     }
     fetch('/api/open-file', {
@@ -1408,16 +1219,16 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filePath }),
     }).then((r) => r.json()).then((d) => {
-      if (!d.success) toast(d.error || 'فشل فتح الملف', 'error');
-    }).catch(() => toast('فشل فتح الملف', 'error'));
+      if (!d.success) toast('مقدرناش نفتح الملف', 'error');
+    }).catch(() => toast('مقدرناش نفتح الملف', 'error'));
   }
 
   function openDownloadedFolder(filePath) {
-    if (!filePath) return toast('مسار الملف غير معروف', 'warning');
+    if (!filePath) return toast('مش لاقيين الملف', 'warning');
     if (window.electronAPI?.shell) {
       window.electronAPI.shell.showItemInFolder(filePath).then((d) => {
-        if (!d?.success) toast(d?.error || 'فشل فتح المجلد', 'error');
-      }).catch(() => toast('فشل فتح المجلد', 'error'));
+        if (!d?.success) toast('مقدرناش نفتح الفولدر', 'error');
+      }).catch(() => toast('مقدرناش نفتح الفولدر', 'error'));
       return;
     }
     fetch('/api/open-folder', {
@@ -1425,8 +1236,8 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filePath }),
     }).then((r) => r.json()).then((d) => {
-      if (!d.success) toast(d.error || 'فشل فتح المجلد', 'error');
-    }).catch(() => toast('فشل فتح المجلد', 'error'));
+      if (!d.success) toast('مقدرناش نفتح الفولدر', 'error');
+    }).catch(() => toast('مقدرناش نفتح الفولدر', 'error'));
   }
 
 
@@ -1436,56 +1247,65 @@
       const saved = localStorage.getItem('mediagrab_settings');
       if (saved) Object.assign(state.settings, JSON.parse(saved));
     } catch { /* ignore */ }
+    Object.assign(state.settings, FIXED_SETTINGS);
     applySettingsToForm();
   }
+
+  // Everything the screen no longer shows keeps these fixed values.
+  const FIXED_SETTINGS = {
+    concurrent: 3, filenameTemplate: '{title}', autoDetect: true, autoDownload: false,
+    skipExisting: true, organizeByAuthor: false, notifyOnComplete: true,
+    speedLimitKBps: 0, downloadSubs: false, cookiesFile: '', customArgs: '',
+  };
+  const QUALITIES = ['best', '720', '480'];
 
   function saveSettings() {
     state.settings.outputDir = $('#output-dir').value.trim();
     state.settings.quality = $('#video-quality').value;
-    state.settings.concurrent = parseInt($('#concurrent-downloads').value, 10);
-    state.settings.filenameTemplate = $('#filename-template').value.trim() || '{title}';
-    state.settings.autoDetect = $('#auto-detect-platform').checked;
-    state.settings.autoDownload = $('#auto-download').checked;
-    state.settings.skipExisting = $('#skip-existing').checked;
-    state.settings.organizeByAuthor = $('#organize-by-author').checked;
-    state.settings.notifyOnComplete = $('#notify-on-complete').checked;
-    state.settings.speedLimitKBps = Math.max(0, parseInt($('#speed-limit').value, 10) || 0);
-    state.settings.downloadSubs = $('#download-subs').checked;
-    state.settings.cookiesFile = $('#cookies-file').value.trim();
-    state.settings.customArgs = $('#custom-args').value.trim();
-    localStorage.setItem('mediagrab_settings', JSON.stringify(state.settings));
+    Object.assign(state.settings, FIXED_SETTINGS);
+    try { localStorage.setItem('mediagrab_settings', JSON.stringify(state.settings)); } catch (e) { console.warn('[ui] storage', e); }
     dom.settingsModal.classList.add('hidden');
     toast('تم حفظ الإعدادات', 'success');
-    // Request notification permission if enabled
-    if (state.settings.notifyOnComplete && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
   }
 
   function resetSettings() {
-    state.settings = {
-      outputDir: '', quality: 'best', concurrent: 3,
-      filenameTemplate: '{title}', autoDetect: true, autoDownload: false,
-      skipExisting: true, organizeByAuthor: false, notifyOnComplete: true,
-    };
+    state.settings = Object.assign({ outputDir: '', quality: 'best' }, FIXED_SETTINGS);
     applySettingsToForm();
-    toast('تمت إعادة الإعدادات الافتراضية', 'info');
+    toast('رجّعنا الإعدادات زي أول مرة', 'info');
   }
 
   function applySettingsToForm() {
-    $('#output-dir').value = state.settings.outputDir;
+    if (!QUALITIES.includes(state.settings.quality)) state.settings.quality = 'best';
+    $('#output-dir').value = state.settings.outputDir || '';
+    $('#output-dir').placeholder = currentBase();
     $('#video-quality').value = state.settings.quality;
-    $('#concurrent-downloads').value = state.settings.concurrent;
-    $('#filename-template').value = state.settings.filenameTemplate;
-    $('#auto-detect-platform').checked = state.settings.autoDetect;
-    $('#auto-download').checked = state.settings.autoDownload;
-    if ($('#skip-existing'))      $('#skip-existing').checked      = state.settings.skipExisting;
-    if ($('#organize-by-author')) $('#organize-by-author').checked = state.settings.organizeByAuthor;
-    if ($('#notify-on-complete')) $('#notify-on-complete').checked = state.settings.notifyOnComplete;
-    if ($('#speed-limit')) $('#speed-limit').value = state.settings.speedLimitKBps || 0;
-    if ($('#download-subs')) $('#download-subs').checked = state.settings.downloadSubs;
-    if ($('#cookies-file')) $('#cookies-file').value = state.settings.cookiesFile || '';
-    if ($('#custom-args')) $('#custom-args').value = state.settings.customArgs || '';
+  }
+
+  function pickDefaultFolder() {
+    const api = window.electronAPI && window.electronAPI.dialog;
+    if (!api) return toast('اختيار المكان في تطبيق سطح المكتب بس', 'warning');
+    api.pickFolder(currentBase()).then((r) => {
+      if (!r || !r.success) return;
+      $('#output-dir').value = r.path;
+    });
+  }
+
+  // ─── Theme: light by default, dark optional, remembered ──
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    try { localStorage.setItem('mg-theme', t); } catch (e) { console.warn('[ui] storage', e); }
+    const dark = t === 'dark';
+    const label = $('#theme-label');
+    if (label) label.textContent = dark ? 'الوضع الفاتح' : 'الوضع الداكن';
+    const use = document.querySelector('#theme-btn use');
+    if (use) use.setAttribute('href', dark ? '#i-sun' : '#i-moon');
+  }
+
+  function bindTheme() {
+    applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
+    $('#theme-btn').addEventListener('click', () => {
+      applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    });
   }
 
 
@@ -1502,16 +1322,14 @@
     dom.adlibBackBtn.addEventListener('click', () => showAdLib(false));
 
     bindFolderPicker();
+    bindTheme();
+    $('#output-dir-pick').addEventListener('click', pickDefaultFolder);
 
     dom.goBtn.addEventListener('click', go);
     dom.mainInput.addEventListener('input', updateGoButton);
     dom.mainInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); go(); }
     });
-
-    if (dom.openHomeBtn) {
-      dom.openHomeBtn.addEventListener('click', () => openPopup(state.platform));
-    }
 
     if (dom.subfolderInput) {
       dom.subfolderInput.addEventListener('input', updateFolderUI);
@@ -1526,7 +1344,7 @@
           const r = await apiCall('/cancel-all', null, 'POST');
           toast(`وقّفنا ${r.cancelled || 0} تحميل`, 'warning');
         } catch (err) {
-          toast('مقدرناش نوقف: ' + err.message, 'error');
+          toast('مقدرناش نوقف التحميلات', 'error');
         }
       });
     }
@@ -1549,43 +1367,6 @@
     dom.settingsReset.addEventListener('click', resetSettings);
     dom.settingsModal.addEventListener('click', (e) => {
       if (e.target === dom.settingsModal) dom.settingsModal.classList.add('hidden');
-    });
-
-    // ── Stats ──
-    if (dom.statsBtn) dom.statsBtn.addEventListener('click', openStats);
-    if (dom.statsClose) dom.statsClose.addEventListener('click', () => dom.statsModal.classList.add('hidden'));
-    if (dom.statsModal) {
-      dom.statsModal.addEventListener('click', (e) => {
-        if (e.target === dom.statsModal) dom.statsModal.classList.add('hidden');
-      });
-    }
-
-    // ── Product notes ──
-    if (dom.notesBtn) dom.notesBtn.addEventListener('click', openNotes);
-    if (dom.notesClose) dom.notesClose.addEventListener('click', () => dom.notesModal.classList.add('hidden'));
-    if (dom.notesModal) {
-      dom.notesModal.addEventListener('click', (e) => {
-        if (e.target === dom.notesModal) dom.notesModal.classList.add('hidden');
-      });
-    }
-    if (dom.notesAddBtn) dom.notesAddBtn.addEventListener('click', addNote);
-    if (dom.notesInput) {
-      dom.notesInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); addNote(); }
-      });
-    }
-    if (dom.notesClearDone) dom.notesClearDone.addEventListener('click', () => {
-      const list = loadNotes();
-      if (!list.some((n) => n.done)) return toast('مفيش منتجات متعلّم عليها', 'info');
-      if (!confirm('تمسح كل المنتجات اللي اتحمّلت من القايمة؟')) return;
-      saveNotes(list.filter((n) => !n.done));
-      renderNotes();
-    });
-    if (dom.notesClearAll) dom.notesClearAll.addEventListener('click', () => {
-      if (!loadNotes().length) return;
-      if (!confirm('تمسح قايمة المنتجات كلها؟')) return;
-      saveNotes([]);
-      renderNotes();
     });
 
     bindReverseImageSearch();
@@ -1613,7 +1394,7 @@
         if (r && r.success) {
           toast('فتحنا نتيجة جوجل في المتصفح — هتلاقي اسم المنتج بالانجليزي، انسخه وابحث بيه فوق', 'success', 7000);
         } else {
-          toast('فشل البحث بالصورة: ' + ((r && r.error) || 'خطأ غير معروف'), 'error');
+          toast('مقدرناش نبحث بالصورة — جرّب تاني', 'error');
         }
       } catch {
         toast('مقدرناش نقرا الصورة من الحافظة', 'error');
@@ -1738,10 +1519,6 @@
     // Placeholders are examples, and a Windows example on a Mac is a wrong hint.
     const batchFolder = document.getElementById('batch-folder');
     if (batchFolder) batchFolder.placeholder = batchDefaultDir();
-    const cookiesFile = document.getElementById('cookies-file');
-    if (cookiesFile && state.env.home) {
-      cookiesFile.placeholder = 'مثال: ' + state.env.home + (state.env.sep || '\\') + 'cookies.txt';
-    }
     updateFolderUI();
   }
 
@@ -1757,7 +1534,6 @@
     bindFacebookLoginButtons();
     bindAdLibrary();
     bindBatchModal();
-    bindCookieImportButtons();
     bindYtdlpButtons();
     bindAppUpdateButtons();
     selectPlatform('tiktok');

@@ -163,6 +163,24 @@ function registerEmbeds(options) {
     return { active: (r && Array.isArray(r.active)) ? r.active.length : 0 };
   });
 
+  // The toolbar wears the same theme as the app (light/dark, stored in its page).
+  ipcMain.handle('embed:theme', async () => {
+    const main = cfg.getMainWin();
+    if (!main || main.isDestroyed()) return 'light';
+    try { return await main.webContents.executeJavaScript("document.documentElement.getAttribute('data-theme')"); } catch (e) { console.warn('[embed] theme', e.message); return 'light'; }
+  });
+
+  // «Try another word»: back to the app, cursor in the box.
+  ipcMain.handle('embed:retype', async (evt) => {
+    const win = BrowserWindow.fromWebContents(evt.sender);
+    if (win && !win.isDestroyed()) win.close();
+    const main = cfg.getMainWin();
+    if (!main || main.isDestroyed()) return { success: false };
+    main.show(); main.focus();
+    try { await main.webContents.executeJavaScript("(function(){var i=document.getElementById('main-input');if(i){i.focus();i.select();}})()"); } catch (e) { console.warn('[embed] retype', e.message); }
+    return { success: true };
+  });
+
   ipcMain.handle('embed:stopAll', async () => {
     const r = await serverJson('POST', '/api/cancel-all', {});
     return r || { cancelled: 0 };

@@ -282,45 +282,62 @@ module.exports = function initEmbed(rules) {
 
   /* ── the toolbar: one slim row ────────────────────────────────────── */
 
+  // Colours live in variables on the bar: light by default, `.mg-dark` flips them
+  // to follow the app's own theme (see syncTheme).
   const CSS = [
-    '#mg-toolbar{position:fixed;top:0;left:0;right:0;max-height:38vh;z-index:2147483647;color:#e9e7f5;',
-    'background:rgba(21,19,31,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);',
-    'border-bottom:1px solid rgba(124,92,255,.22);box-shadow:0 2px 14px rgba(0,0,0,.45);direction:rtl;',
+    '#mg-toolbar{--bg:rgba(255,255,255,.94);--fg:#2A2622;--sub:#5F584F;--hov:rgba(60,40,20,.08);--chip:rgba(60,40,20,.06);',
+    '--line:rgba(60,40,20,.14);--pop:#FFFFFF;--inp:#FFFFFF;--inl:rgba(60,40,20,.22);--cnt:#C2410C;--shadow:rgba(60,40,20,.16);',
+    '--grad:linear-gradient(135deg,#FF7A45,#E5532D);--glow:rgba(229,83,45,.32);--sel:rgba(229,83,45,.14);}',
+    '#mg-toolbar.mg-dark{--bg:rgba(27,30,43,.92);--fg:#ECEEF5;--sub:#B0B5C9;--hov:rgba(255,255,255,.1);--chip:rgba(255,255,255,.07);',
+    '--line:rgba(255,255,255,.12);--pop:#242838;--inp:#1F2231;--inl:rgba(255,255,255,.18);--cnt:#FFB59A;--shadow:rgba(0,0,0,.45);--sel:rgba(255,107,61,.2);}',
+    '#mg-toolbar{position:fixed;top:0;left:0;right:0;max-height:38vh;z-index:2147483647;color:var(--fg);',
+    'background:var(--bg);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);',
+    'border-bottom:1px solid var(--line);box-shadow:0 2px 14px var(--shadow);direction:rtl;',
     "font-family:'Segoe UI',Tahoma,sans-serif;font-size:13px;line-height:1.2;}",
     '#mg-toolbar *{box-sizing:border-box;}',
     '#mg-row{height:48px;padding:0 12px;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:10px;position:relative;}',
     '#mg-toolbar .mg-grp{display:flex;align-items:center;gap:6px;min-width:0;}',
     '#mg-toolbar .mg-left{justify-self:end;}',
     '#mg-toolbar .mg-mark{width:26px;height:26px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;',
-    'color:#fff;background:linear-gradient(135deg,#7c5cff,#a855f7);}',
+    'color:#fff;background:var(--grad);}',
     '#mg-toolbar button{font:inherit;cursor:pointer;border:none;outline:none;}',
+    '#mg-toolbar button:focus-visible{box-shadow:0 0 0 2px var(--glow);}',
     '#mg-toolbar .mg-chip{display:flex;align-items:center;gap:6px;height:32px;max-width:100%;padding:0 10px;border-radius:9px;',
-    'background:rgba(255,255,255,.06);color:#e9e7f5;}',
+    'background:var(--chip);color:var(--fg);}',
     '#mg-toolbar .mg-chip b{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;direction:ltr;}',
-    '#mg-toolbar .mg-chip span{opacity:.6;white-space:nowrap;}',
+    '#mg-toolbar .mg-chip span{opacity:.7;white-space:nowrap;}',
     '#mg-toolbar .mg-chip svg,#mg-toolbar .mg-ib svg,#mg-toolbar .mg-txt svg{margin:0!important;}',
-    '#mg-toolbar .mg-ib{width:32px;height:32px;border-radius:9px;background:transparent;color:#c3c1d6;display:flex;align-items:center;justify-content:center;}',
-    '#mg-toolbar .mg-ib:hover,#mg-toolbar .mg-chip:hover,#mg-toolbar .mg-txt:hover{background:rgba(255,255,255,.12);color:#fff;}',
-    '#mg-toolbar .mg-txt{height:32px;padding:0 10px;border-radius:9px;background:transparent;color:#a3a1b8;display:flex;align-items:center;gap:6px;white-space:nowrap;}',
-    '#mg-toolbar .mg-txt.on{background:rgba(124,92,255,.22);color:#fff;}',
+    '#mg-toolbar .mg-ib{width:32px;height:32px;border-radius:9px;background:transparent;color:var(--sub);display:flex;align-items:center;justify-content:center;}',
+    '#mg-toolbar .mg-ib:hover,#mg-toolbar .mg-chip:hover,#mg-toolbar .mg-txt:hover{background:var(--hov);color:var(--fg);}',
+    '#mg-toolbar .mg-txt{height:32px;padding:0 10px;border-radius:9px;background:transparent;color:var(--sub);display:flex;align-items:center;gap:6px;white-space:nowrap;}',
+    '#mg-toolbar .mg-txt.on{background:var(--sel);color:var(--fg);}',
     '#mg-toolbar .mg-primary{height:34px;padding:0 18px;border-radius:10px;color:#fff;font-weight:700;display:flex;align-items:center;gap:7px;',
-    'background:linear-gradient(135deg,#7c5cff,#9b5cf6);white-space:nowrap;box-shadow:0 2px 10px rgba(124,92,255,.35);}',
-    '#mg-toolbar .mg-primary:hover{filter:brightness(1.12);}',
-    '#mg-toolbar .mg-primary[disabled]{opacity:.4;cursor:default;filter:none;box-shadow:none;}',
+    'background:var(--grad);white-space:nowrap;box-shadow:0 2px 10px var(--glow);}',
+    '#mg-toolbar .mg-primary:hover{filter:brightness(1.08);}',
+    '#mg-toolbar .mg-primary[disabled]{opacity:.45;cursor:default;filter:none;box-shadow:none;}',
     '#mg-toolbar .mg-primary svg{margin:0!important;}',
-    '#mg-toolbar .mg-cnt{font-weight:700;color:#cfc6ff;white-space:nowrap;direction:ltr;}',
+    '#mg-toolbar .mg-cnt{font-weight:700;color:var(--cnt);white-space:nowrap;direction:ltr;}',
     '#mg-toolbar .mg-pop{display:none;position:absolute;top:50px;z-index:2;min-width:230px;padding:10px;border-radius:12px;',
-    'background:#1b1830;border:1px solid rgba(124,92,255,.3);box-shadow:0 10px 30px rgba(0,0,0,.55);flex-direction:column;gap:8px;}',
+    'background:var(--pop);border:1px solid var(--line);box-shadow:0 10px 30px var(--shadow);flex-direction:column;gap:8px;}',
     '#mg-toolbar .mg-pop.open{display:flex;}',
-    '#mg-toolbar .mg-pop input{width:100%;height:34px;padding:0 10px;border-radius:8px;border:1px solid #3a3754;background:#120f1d;color:#fff;direction:ltr;font-size:13px;font-weight:600;}',
-    '#mg-toolbar .mg-pop small{color:#8b93b8;direction:ltr;word-break:break-all;}',
-    '#mg-toolbar .mg-item{height:34px;padding:0 10px;border-radius:8px;background:transparent;color:#e9e7f5;display:flex;align-items:center;gap:8px;text-align:start;}',
-    '#mg-toolbar .mg-item:hover{background:rgba(255,255,255,.1);}',
+    '#mg-toolbar .mg-pop input{width:100%;height:34px;padding:0 10px;border-radius:8px;border:1px solid var(--inl);background:var(--inp);color:var(--fg);direction:ltr;font-size:13px;font-weight:600;}',
+    '#mg-toolbar .mg-pop small{color:var(--sub);direction:ltr;word-break:break-all;}',
+    '#mg-toolbar .mg-item{height:34px;padding:0 10px;border-radius:8px;background:transparent;color:var(--fg);display:flex;align-items:center;gap:8px;text-align:start;}',
+    '#mg-toolbar .mg-item:hover{background:var(--hov);}',
     '@media (max-width:820px){#mg-toolbar .mg-chip span{display:none}#mg-toolbar .mg-chip b{max-width:90px}#mg-toolbar .mg-primary{padding:0 12px}}',
     '@media (max-width:600px){#mg-row{padding:0 8px;gap:6px}#mg-toolbar #mg-seltoggle{font-size:0;padding:0 8px}#mg-toolbar .mg-chip b{max-width:60px}}',
     '#mg-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:transparent;display:none;}',
-    '#mg-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#7c5cff,#a855f7);transition:width .4s;}',
+    '#mg-bar i{display:block;height:100%;width:0;background:var(--grad);transition:width .4s;}',
   ].join('');
+
+  // The app's theme decides the bar's colours (asked of the main window).
+  async function syncTheme() {
+    try {
+      const t = await ipcRenderer.invoke('embed:theme');
+      const bar = $('#mg-toolbar');
+      if (bar) bar.classList.toggle('mg-dark', t === 'dark');
+    } catch {}
+  }
 
   function iconBtn(name, title, onClick) {
     const b = document.createElement('button');
@@ -549,42 +566,56 @@ module.exports = function initEmbed(rules) {
   /* ── "the site came back empty" rescue row ────────────────────────── */
 
   const EMPTY_AFTER_MS = 9000;
-  let emptySince = 0, sawCards = false, lastKey = '';
+  let emptySince = 0, sawCards = false, lastKey = '', reloaded = false;
 
+  // One calm line, one button: either «no results — try another word» or, when
+  // the site itself is asking for a login, «log in first» (the site's own page).
   function rescueRow() {
     const row = document.createElement('div');
     row.id = 'mg-empty';
-    row.style.cssText = 'display:none;gap:8px;align-items:center;flex-wrap:wrap;background:#3b1d1d;'
-      + 'border:1px solid #7f1d1d;border-radius:8px;padding:8px 12px;';
-    const msg = mkEl('span', '⚠️ ', 'flex:1;min-width:240px;line-height:1.6;');
-    msg.appendChild(mkEl('strong', 'الموقع رجّع صفر نتيجة للبحث ده.'));
-    msg.appendChild(mkEl('span', ' ده مش عطل في البرنامج — غالبًا تسجيل الدخول. جرّب:', 'opacity:.85;'));
+    row.style.cssText = 'display:none;gap:10px;align-items:center;background:var(--chip);'
+      + 'border:1px solid var(--line);border-radius:10px;padding:6px 12px;min-height:40px;';
+    const msg = mkEl('span', '', 'flex:1;min-width:0;line-height:1.5;');
+    msg.id = 'mg-empty-msg';
     row.appendChild(msg);
-    row.appendChild(mkBtn('🕵️ جرّب من غير تسجيل دخول', 'يفتح نفس الصفحة في نافذة نضيفة من غير أي كوكيز', '#7c3aed',
-      () => ipcRenderer.invoke('embed:guest', location.href).catch(() => {})));
-    const relog = mkBtn('🔑 سجّل دخول من جديد', 'يمسح الجلسة الحالية وتسجّل دخول بإيدك، وبعدين يعيد الصفحة', '#2563eb', () => {
-      relog.textContent = '… بيفتح صفحة الدخول';
-      ipcRenderer.invoke('embed:relogin').catch(() => {})
-        .then(() => { setLabel(relog, '🔑 سجّل دخول من جديد'); });
+    const act = mkBtn('🔎 جرّب كلمة تانية', '', '#E5532D', () => {
+      if (act.dataset.mode === 'login') ipcRenderer.invoke('embed:relogin').catch(() => {});
+      else ipcRenderer.invoke('embed:retype').catch(() => {});
     });
-    row.appendChild(relog);
-    row.appendChild(mkBtn('🌐 افتح في المتصفح', 'يفتح نفس الصفحة في متصفحك — لو فاضية هناك كمان يبقى الموقع نفسه', '#374151',
-      () => ipcRenderer.invoke('embed:external', location.href).catch(() => {})));
+    act.id = 'mg-empty-act';
+    act.style.padding = '6px 14px';
+    row.appendChild(act);
     return row;
   }
 
+  function needsLogin() { return /login|accounts\/|signin/i.test(location.pathname + location.search); }
+
   // Deliberately waits before accusing anyone: an empty grid a second after
-  // navigating is just a grid still loading.
+  // navigating is just a grid still loading. A page that is still empty after
+  // the first wait is reloaded once by itself; only a second wait shows the line.
   function updateRescue(listing) {
     const row = $('#mg-empty');
     if (!row) return;
     const key = location.pathname + location.search;
-    if (key !== lastKey) { lastKey = key; emptySince = Date.now(); sawCards = false; }
+    if (key !== lastKey) { lastKey = key; emptySince = Date.now(); sawCards = false; reloaded = false; }
     if (!listing) { row.style.display = 'none'; return; }
     if (allButtons().length > 0) { sawCards = true; row.style.display = 'none'; return; }
-    row.style.display = (!sawCards && Date.now() - emptySince > EMPTY_AFTER_MS) ? 'flex' : 'none';
+    const waited = Date.now() - emptySince;
+    if (!sawCards && !reloaded && waited > EMPTY_AFTER_MS && !needsLogin()) {
+      reloaded = true; emptySince = Date.now();
+      try { location.reload(); } catch {}
+      return;
+    }
+    const show = !sawCards && waited > EMPTY_AFTER_MS;
+    if (show) {
+      const login = needsLogin();
+      const act = $('#mg-empty-act');
+      act.dataset.mode = login ? 'login' : 'retype';
+      setLabel(act, login ? '🔑 سجّل دخول' : '🔎 جرّب كلمة تانية');
+      $('#mg-empty-msg').textContent = login ? 'الموقع عايزك تسجّل دخول الأول.' : 'مفيش نتايج للبحث ده.';
+    }
+    row.style.display = show ? 'flex' : 'none';
   }
-
   function injectToolbar() {
     if ($('#mg-toolbar') || !document.body) return;
     const bar = document.createElement('div');
@@ -596,6 +627,8 @@ module.exports = function initEmbed(rules) {
       bar.appendChild(rescue);
     }
     document.addEventListener('click', () => closePops(), true);
+    syncTheme();
+    setInterval(syncTheme, 4000);
     (document.body || document.documentElement).appendChild(bar);
 
     pushPageDown();
