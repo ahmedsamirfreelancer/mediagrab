@@ -230,11 +230,34 @@ module.exports = function initEmbed(rules) {
       for (const el of $$('body *')) {
         if (el.id === 'mg-toolbar' || el.closest('#mg-toolbar')) continue;
         const cs = getComputedStyle(el);
+        // An app shell pinned absolutely to the window (YouTube's <ytd-app>)
+        // ignores body padding too: move it down and shrink it by the bar.
+        if (cs.position === 'absolute' && el.parentElement === document.body
+            && (el.dataset.mgShell || (parseFloat(cs.top) <= 4 && el.offsetHeight >= window.innerHeight * 0.8))) {
+          el.dataset.mgShell = '1';
+          el.style.top = h + 'px';
+          el.style.height = 'calc(100% - ' + h + 'px)';
+          continue;
+        }
+        // YouTube's side drawer manages its own top (it compensates for the
+        // shifted app shell), so we pin it where its first row clears the
+        // site's header instead of adding the bar on top of its own value.
+        if (el.localName === 'tp-yt-app-drawer') {
+          const dTop = (h + 44) + 'px';
+          if (el.style.top !== dTop) el.style.top = dTop;
+          continue;
+        }
         if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
         if (cs.position === 'sticky' && !scrollsWithWindow(el)) continue;
-        const top = parseFloat(cs.top);
-        if (!isFinite(top) || top > 80) continue; // near-top anchored bars only
-        const want = h + 'px';
+        // Shift by the bar's height from the element's ORIGINAL offset: a
+        // side drawer pinned at top:56px must stay 56px under the site's own
+        // header, not land on top of it.
+        if (el.dataset.mgTop0 === undefined) {
+          const top = parseFloat(cs.top);
+          if (!isFinite(top) || top > 80) continue; // near-top anchored bars only
+          el.dataset.mgTop0 = String(top);
+        }
+        const want = (parseFloat(el.dataset.mgTop0) + h) + 'px';
         if (el.style.top !== want) el.style.top = want;
       }
     } catch {}
@@ -398,7 +421,7 @@ module.exports = function initEmbed(rules) {
     if ($('#mg-toolbar') || !document.body) return;
     const bar = document.createElement('div');
     bar.id = 'mg-toolbar';
-    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#15131f;'
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;max-height:38vh;overflow-y:auto;z-index:2147483647;background:#15131f;'
       + 'color:#fff;display:flex;flex-direction:column;gap:9px;padding:11px 16px;font-family:sans-serif;'
       + 'font-size:13px;box-shadow:0 2px 16px rgba(0,0,0,.7);direction:rtl;border-bottom:1px solid #2a2740;';
     bar.appendChild(folderRow());
