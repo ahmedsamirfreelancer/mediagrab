@@ -111,8 +111,12 @@ function createMainWindow() {
   });
 
   mainWin.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (/^https?:\/\//i.test(String(url))) shell.openExternal(url);
     return { action: 'deny' };
+  });
+  // The main window only ever shows the local UI: never navigate away from it.
+  mainWin.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith(`http://127.0.0.1:${SERVER_PORT}`)) e.preventDefault();
   });
 
   // In dev (`npm start`) the renderer's console is invisible from the
@@ -177,8 +181,14 @@ ipcMain.handle('dialog:pickFolder', async (_evt, defaultPath) => {
   return { success: true, path: r.filePaths[0] };
 });
 
+const SAFE_OPEN_EXT = /\.(mp4|mkv|webm|mov|m4v|avi|mp3|m4a|aac|wav|ogg|opus|flac|jpg|jpeg|png|webp|gif|srt|vtt)$/i;
 ipcMain.handle('shell:openPath', async (_evt, filePath) => {
   if (typeof filePath !== 'string' || !filePath) return { success: false };
+  // Security: never launch executables/scripts; only media & subtitle files
+  // (or an existing folder).
+  let isDir = false;
+  try { isDir = fs.statSync(filePath).isDirectory(); } catch {}
+  if (!isDir && !SAFE_OPEN_EXT.test(filePath)) return { success: false, error: 'نوع ملف غير مسموح' };
   try {
     // Windows MAX_PATH workaround: the \\?\ prefix lifts the 260-char limit
     // for the actual file open. Required when Arabic captions push paths

@@ -378,6 +378,29 @@ function ytdlpExtraArgsForUrl(targetUrl) {
 }
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
+app.disable('x-powered-by');
+// ─── Local-only guard (anti DNS-rebinding / cross-site requests) ──────────────
+// The server is for the app's own window only: reject any request whose Host
+// is not loopback, whose Origin is another site, or that the browser marks
+// cross-site. Blocks malicious web pages from driving /api/* via localhost.
+app.use((req, res, next) => {
+  const host = String(req.headers.host || '').toLowerCase();
+  if (host !== `localhost:${PORT}` && host !== `127.0.0.1:${PORT}`) {
+    return res.status(403).json({ error: 'Forbidden host' });
+  }
+  const origin = req.headers.origin;
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+    return res.status(403).json({ error: 'Forbidden origin' });
+  }
+  const site = req.headers['sec-fetch-site'];
+  if (site && site !== 'same-origin' && site !== 'none') {
+    return res.status(403).json({ error: 'Forbidden cross-site request' });
+  }
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -1101,12 +1124,14 @@ app.post('/api/download', async (req, res) => {
       organizeByAuthor = false,
       speedLimitKBps = 0,
       downloadSubs = false,
-      cookiesFile = '',
-      customArgs = '',
       subfolder = '',
       autoRetry = 2,        // try up to N extra times on failure
       ignoreGlobalDedupe = false, // bypass cross-session dedupe (per-product folders)
     } = req.body || {};
+    // Security: never accept raw yt-dlp args or arbitrary cookie paths from the
+    // HTTP API (yt-dlp --exec = command execution). Fixed server-side values.
+    const cookiesFile = '';
+    const customArgs = '';
 
     if (!targetUrl && (!Array.isArray(selectedVideos) || selectedVideos.length === 0)) {
       return res.status(400).json({ error: 'URL or selectedVideos required' });
@@ -1657,11 +1682,28 @@ app.patch('/api/bookmarks/:id', (req, res) => {
 });
 
 
+// Files the app may open/delete: only media/subtitle types, never executables.
+const SAFE_FILE_EXT = /\.(mp4|mkv|webm|mov|m4v|avi|mp3|m4a|aac|wav|ogg|opus|flac|jpg|jpeg|png|webp|gif|srt|vtt)$/i;
+function isSafeUserFile(filePath) {
+  if (typeof filePath !== 'string' || filePath.length > 1024 || filePath.includes(' ')) return false;
+  if (!path.isAbsolute(filePath)) return false;
+  const resolved = path.resolve(filePath);
+  if (!SAFE_FILE_EXT.test(resolved)) return false;
+  const target = resolved.toLowerCase() + path.sep;
+  for (const forbidden of FORBIDDEN_DIRS) {
+    if (target.startsWith(forbidden.toLowerCase() + path.sep)) return false;
+  }
+  return true;
+}
+
 // POST /api/open-file — open a downloaded file with the OS default app
 app.post('/api/open-file', (req, res) => {
   const { filePath } = req.body || {};
   if (!filePath || typeof filePath !== 'string') {
     return res.status(400).json({ error: 'filePath required' });
+  }
+  if (!isSafeUserFile(filePath)) {
+    return res.status(403).json({ error: 'Refusing to open this file type' });
   }
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'File not found' });
@@ -1687,7 +1729,10 @@ app.delete('/api/file', (req, res) => {
   if (!filePath || typeof filePath !== 'string') {
     return res.status(400).json({ error: 'filePath required' });
   }
-  // Safety: only allow deletes inside the user's download tree (never System dirs)
+  // Safety: only media/subtitle files, never System dirs
+  if (!isSafeUserFile(filePath)) {
+    return res.status(403).json({ error: 'Refusing to delete this file type' });
+  }
   try {
     const resolved = path.resolve(filePath);
     for (const forbidden of FORBIDDEN_DIRS) {
@@ -1732,11 +1777,9 @@ app.post('/api/open-folder', (req, res) => {
       // explorer.exe wants `/select,"C:\path\to\file"` as a SINGLE arg, not
       // two separate args. Using `shell: true` lets us pass the whole
       // command string so quoting + Arabic paths work correctly.
-      const target = fileExists ? filePath : folder;
-      const cmd = fileExists
-        ? `explorer.exe /select,"${target}"`
-        : `explorer.exe "${target}"`;
-      spawn(cmd, { shell: true, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      // No shell: the path is one argv entry (no command injection via quotes).
+      const eargs = fileExists ? [`/select,${filePath}`] : [folder];
+      spawn('explorer.exe', eargs, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     } else if (process.platform === 'darwin') {
       // -R reveals and selects the file in Finder — the mac equivalent of
       // explorer /select above. Without a file we just open the folder.
@@ -1993,8 +2036,16 @@ app.delete('/api/interrupted', (req, res) => {
   res.json({ success: true });
 });
 
+// Generic error handler: never leak stack traces / file paths to callers.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const st = Number(err && (err.status || err.statusCode));
+  const status = st >= 400 && st < 500 ? st : 500;
+  res.status(status).json({ error: status === 400 ? 'Bad request' : 'Server error' });
+});
+
 // ─── Start ─────────────────────────────────────────────────────────────────────
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`Media Downloader server running at http://localhost:${PORT}`);
   console.log(`Default output dir: ${DEFAULT_OUTPUT_DIR}`);
   ensureDir(DEFAULT_OUTPUT_DIR);
