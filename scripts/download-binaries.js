@@ -155,7 +155,9 @@ async function downloadFfmpeg() {
   fs.mkdirSync(extractDir, { recursive: true });
 
   if (process.platform === 'win32') {
-    execSync(`powershell -Command "Expand-Archive -Force -Path '${zipPath}' -DestinationPath '${extractDir}'"`, { stdio: 'inherit' });
+    // bsdtar ships with Windows 10+ and reads zips. Expand-Archive broke on
+    // the CI runner's PowerShell 7 ("ExtractToDirectory" overload error).
+    execSync(`tar -xf "${zipPath}" -C "${extractDir}"`, { stdio: 'inherit' });
   } else {
     execSync(`unzip -q -o "${zipPath}" -d "${extractDir}"`, { stdio: 'inherit' });
   }
