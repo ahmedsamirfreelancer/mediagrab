@@ -57,6 +57,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   // Opening the downloaded file/folder. Avoids spawning explorer.exe from the
   // forked Node server, which mishandles UTF-8 paths and detached output.
+  dialog: {
+    pickFolder: (defaultPath) => ipcRenderer.invoke('dialog:pickFolder', defaultPath),
+  },
   shell: {
     showItemInFolder: (filePath) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
     openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),

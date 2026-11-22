@@ -57,6 +57,9 @@
     folderChip: $('#folder-chip'),
     folderChipName: $('#folder-chip-name'),
     adlibMenuBtn: $('#adlib-menu-btn'),
+    folderPop: $('#folder-pop'),
+    folderList: $('#folder-list'),
+    folderSuggest: $('#folder-suggest'),
     adlibBackBtn: $('#adlib-back-btn'),
     adlibSection: $('#adlib-section'),
     statsBtn: $('#stats-btn'),
@@ -400,6 +403,111 @@
       : willDownload ? `لينك فيديو من ${platformName(key)} — هينزّل على طول`
         : link ? `هنفتح الصفحة دي في شباك ${platformName(key)} وعليها أزرار تحميل`
           : `هنبحث في ${platformName(key)} — دوس على أي شارة تحت عشان تغيّر الموقع`;
+  }
+
+  /* ─── «بينزّل في» quick picker ────────────────────────────────────────────
+   * The base folder lives in Settings; this only chooses the sub-folder the
+   * next downloads land in. The last choice is remembered across restarts (a
+   * folder that has since been deleted is simply created again on download). */
+  const LAST_SUB_KEY = 'mediagrab_last_subfolder';
+
+  function setSubfolder(name) {
+    dom.subfolderInput.value = name;
+    try { localStorage.setItem(LAST_SUB_KEY, name); } catch (e) { console.warn('[ui] storage', e); }
+    updateFolderUI();
+  }
+
+  function popBtn(cls, label, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  async function renderFolderList() {
+    dom.folderList.textContent = '';
+    let folders = [];
+    try {
+      folders = (await apiCall('/folders?base=' + encodeURIComponent(currentBase()), null, 'GET')).folders || [];
+    } catch (e) { console.warn('[ui] folders', e); }
+    const cur = getCurrentSubfolder();
+    if (!folders.length) {
+      const empty = document.createElement('div');
+      empty.className = 'pop-empty';
+      empty.textContent = 'لسه مفيش فولدرات — اكتب اسم فوق';
+      dom.folderList.appendChild(empty);
+    }
+    for (const f of folders) {
+      const row = popBtn('pop-item' + (f.name === cur ? ' current' : ''), '', () => { setSubfolder(f.name); toggleFolderPop(false); });
+      const n = document.createElement('span'); n.textContent = f.name;
+      const c = document.createElement('small'); c.textContent = `${f.count} فيديو`;
+      row.append(n, c);
+      dom.folderList.appendChild(row);
+    }
+  }
+
+  function toggleFolderPop(open) {
+    const show = open === undefined ? dom.folderPop.classList.contains('hidden') : open;
+    dom.folderPop.classList.toggle('hidden', !show);
+    dom.folderChip.setAttribute('aria-expanded', String(show));
+    if (!show) return;
+    if (dom.menu) toggleMenu(false);
+    dom.subfolderInput.value = '';
+    // A product name already typed in the box is offered, never forced.
+    const text = (dom.mainInput.value || '').trim();
+    const suggest = text && !isValidUrl(text) && text.length < 60 ? text : '';
+    dom.folderSuggest.classList.toggle('hidden', !suggest);
+    dom.folderSuggest.textContent = suggest ? `اقتراح: ${suggest}` : '';
+    dom.folderSuggest.dataset.name = suggest;
+    renderFolderList();
+    dom.subfolderInput.focus();
+  }
+
+  function bindFolderPicker() {
+    try {
+      const last = localStorage.getItem(LAST_SUB_KEY);
+      if (last) dom.subfolderInput.value = last;
+    } catch (e) { console.warn('[ui] storage', e); }
+
+    dom.folderChip.addEventListener('click', (e) => { e.stopPropagation(); toggleFolderPop(); });
+    dom.folderPop.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => toggleFolderPop(false));
+    dom.subfolderInput.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const name = dom.subfolderInput.value.trim().replace(/[\\/:*?"<>|]/g, '');
+      if (!name) return;
+      setSubfolder(name);
+      toggleFolderPop(false);
+    });
+    dom.folderSuggest.addEventListener('click', () => {
+      const name = (dom.folderSuggest.dataset.name || '').replace(/[\\/:*?"<>|]/g, '').trim();
+      if (name) setSubfolder(name);
+      toggleFolderPop(false);
+    });
+    $('#folder-pick').addEventListener('click', async () => {
+      const api = window.electronAPI && window.electronAPI.dialog;
+      if (!api) return toast('اختيار المكان في تطبيق سطح المكتب بس', 'warning');
+      const r = await api.pickFolder(currentBase());
+      toggleFolderPop(false);
+      if (!r || !r.success) return;
+      state.settings.outputDir = r.path;
+      try { localStorage.setItem('mediagrab_settings', JSON.stringify(state.settings)); } catch (e) { console.warn('[ui] storage', e); }
+      applySettingsToForm();
+      setSubfolder('');
+      toast('هينزّل في: ' + r.path, 'success');
+    });
+    $('#folder-open').addEventListener('click', () => {
+      toggleFolderPop(false);
+      const dir = currentBase() + (state.env.sep || '\\') + getCurrentSubfolder();
+      if (window.electronAPI && window.electronAPI.shell) window.electronAPI.shell.openPath(dir).then((d) => { if (d && d.success === false) toast('الفولدر لسه مفيهوش تحميلات', 'info'); });
+    });
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey && e.key.toLowerCase() === 'l') || e.key === 'F2') { e.preventDefault(); toggleFolderPop(true); }
+      else if (e.key === 'Escape') toggleFolderPop(false);
+    });
   }
 
   // ─── Platforms ──────────────────────────────────────
@@ -1393,19 +1501,7 @@
     dom.adlibMenuBtn.addEventListener('click', () => showAdLib(true));
     dom.adlibBackBtn.addEventListener('click', () => showAdLib(false));
 
-    // «بينزّل في» — one press turns the name into a box to type in.
-    dom.folderChip.addEventListener('click', () => {
-      dom.folderChip.classList.add('hidden');
-      dom.subfolderInput.classList.remove('hidden');
-      dom.subfolderInput.focus();
-    });
-    const closeFolderEdit = () => {
-      dom.subfolderInput.classList.add('hidden');
-      dom.folderChip.classList.remove('hidden');
-      updateFolderUI();
-    };
-    dom.subfolderInput.addEventListener('blur', closeFolderEdit);
-    dom.subfolderInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') closeFolderEdit(); });
+    bindFolderPicker();
 
     dom.goBtn.addEventListener('click', go);
     dom.mainInput.addEventListener('input', updateGoButton);

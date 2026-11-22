@@ -164,6 +164,16 @@ ipcMain.handle('shell:showItemInFolder', async (_evt, filePath) => {
   }
 });
 
+ipcMain.handle('dialog:pickFolder', async (_evt, defaultPath) => {
+  const r = await dialog.showOpenDialog(mainWin || undefined, {
+    title: 'اختار فولدر التنزيل',
+    defaultPath: typeof defaultPath === 'string' && defaultPath ? defaultPath : undefined,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (r.canceled || !r.filePaths[0]) return { success: false, cancelled: true };
+  return { success: true, path: r.filePaths[0] };
+});
+
 ipcMain.handle('shell:openPath', async (_evt, filePath) => {
   if (typeof filePath !== 'string' || !filePath) return { success: false };
   try {

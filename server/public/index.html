@@ -299,8 +299,18 @@
         </div>
         <div class="launch-folder">
           <span>بينزّل في:</span>
-          <button class="folder-chip" id="folder-chip" type="button" title="دوس عشان تغيّر الفولدر"><span id="folder-chip-name">—</span></button>
-          <input type="text" id="subfolder-input" class="hidden" placeholder="اسم الفولدر" spellcheck="false">
+          <div class="folder-wrap">
+            <button class="folder-chip" id="folder-chip" type="button" title="غيّر الفولدر (Ctrl+L)" aria-haspopup="true" aria-expanded="false"><span class="chip-ico">📁</span><span id="folder-chip-name">—</span><span class="chip-caret">⌄</span></button>
+            <div class="folder-pop hidden" id="folder-pop" role="dialog">
+              <input type="text" id="subfolder-input" placeholder="اسم فولدر جديد واضغط Enter" spellcheck="false" autocomplete="off">
+              <button class="pop-suggest hidden" id="folder-suggest" type="button"></button>
+              <div class="pop-title">آخر الفولدرات</div>
+              <div class="pop-list" id="folder-list"></div>
+              <div class="pop-sep"></div>
+              <button class="pop-action" id="folder-pick" type="button">📂 <span>اختار مكان تاني…</span></button>
+              <button class="pop-action" id="folder-open" type="button">↗ <span>افتح الفولدر الحالي</span></button>
+            </div>
+          </div>
           <span class="folder-path" id="folder-path"></span>
         </div>
       </section>

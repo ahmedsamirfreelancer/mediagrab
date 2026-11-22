@@ -1410,3 +1410,25 @@ body {
 
 textarea { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border); }
 .adlib-section { margin-bottom: 20px; }
+
+/* folder quick picker */
+.folder-wrap { position: relative; }
+.folder-chip { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; font-size: 1.05rem; border-color: rgba(168, 85, 247, 0.45); }
+.folder-chip .chip-caret { color: var(--accent); font-size: 1.1rem; line-height: 1; }
+.folder-pop {
+  position: absolute; top: calc(100% + 8px); right: 50%; transform: translateX(50%);
+  width: 320px; max-width: 86vw; z-index: 60; text-align: right;
+  background: var(--bg-card); border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg); padding: 10px;
+}
+.folder-pop input { width: 100%; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-focus); background: var(--bg-input); color: var(--text-primary); font-family: var(--font); font-size: 0.95rem; outline: none; }
+.pop-suggest { display: block; width: 100%; margin-top: 6px; padding: 7px 10px; background: var(--accent-light); border: none; border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font); font-size: 0.85rem; text-align: right; cursor: pointer; }
+.pop-title { margin: 10px 4px 4px; font-size: 0.75rem; color: var(--text-muted); }
+.pop-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.pop-item, .pop-action { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 9px 10px; background: transparent; border: none; border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font); font-size: 0.92rem; text-align: right; cursor: pointer; }
+.pop-action { justify-content: flex-start; }
+.pop-item:hover, .pop-action:hover { background: var(--accent-light); }
+.pop-item.current { background: var(--accent-light); font-weight: 700; }
+.pop-item small { color: var(--text-muted); font-size: 0.75rem; white-space: nowrap; }
+.pop-empty { padding: 10px; color: var(--text-muted); font-size: 0.85rem; }
+.pop-sep { height: 1px; background: var(--border); margin: 8px 2px; }
