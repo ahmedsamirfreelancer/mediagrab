@@ -207,7 +207,7 @@ function registerEmbeds(options) {
   ipcMain.handle('embed:external', async (evt, url) => {
     const p = platformCfg(platformOf(evt));
     if (!p || !sameSite(p, url)) return { success: false, error: 'رابط برّه الموقع' };
-    await shell.openExternal(String(url));
+    await require('./chrome').openInChrome(String(url));
     return { success: true };
   });
 

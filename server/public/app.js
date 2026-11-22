@@ -1387,12 +1387,12 @@
         return toast('البحث بالصورة في تطبيق سطح المكتب بس', 'warning');
       }
       if (!blob || !blob.size) return toast('مفيش صورة. انسخ صورة المنتج الأول', 'warning');
-      toast('بنرفع الصورة ونفتح جوجل في المتصفح…', 'info', 8000);
+      toast('بنفتح جوجل Lens في كروم…', 'info', 6000);
       try {
         const bytes = new Uint8Array(await blob.arrayBuffer());
         const r = await window.electronAPI.image.reverseSearch(bytes, blob.type || 'image/png');
         if (r && r.success) {
-          toast('فتحنا نتيجة جوجل في المتصفح — هتلاقي اسم المنتج بالانجليزي، انسخه وابحث بيه فوق', 'success', 7000);
+          toast('الصورة اتنسخت — الصق الصورة (Ctrl+V) في صفحة جوجل اللي فتحت', 'success', 9000);
         } else {
           toast('مقدرناش نبحث بالصورة — جرّب تاني', 'error');
         }

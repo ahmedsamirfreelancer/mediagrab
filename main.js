@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
 const { registerEmbeds, openEmbed } = require('./embed/windows');
+const { openInChrome } = require('./embed/chrome');
 
 // Force the same userData folder in dev (`npm start`) and packaged builds.
 // Without this, dev runs land in %APPDATA%/mediagrab (lowercase name from
@@ -111,7 +112,7 @@ function createMainWindow() {
   });
 
   mainWin.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(String(url))) shell.openExternal(url);
+    if (/^https?:\/\//i.test(String(url))) openInChrome(String(url));
     return { action: 'deny' };
   });
   // The main window only ever shows the local UI: never navigate away from it.
@@ -311,17 +312,14 @@ ipcMain.handle('image:reverseSearch', async (_evt, bytes, mime) => {
   try {
     const buffer = Buffer.from(bytes);
     if (!buffer.length) return { success: false, error: 'الصورة فاضية' };
-
-    // 1) Host the image temporarily so Google can fetch it.
-    const publicUrl = await uploadPublicImage(buffer, mime);
-
-    // 2) Let the user's real browser run the Lens search BY URL. The browser
-    //    handles the full redirect/cookie chain itself, so results render
-    //    normally with no "not associated with your account" / 403 errors.
-    const searchUrl = 'https://lens.google.com/uploadbyurl?url='
-      + encodeURIComponent(publicUrl) + '&hl=en';
-    await shell.openExternal(searchUrl);
-    return { success: true, url: searchUrl };
+    // Put the image on the clipboard, then open Google Lens in Chrome: the user
+    // just pastes (Ctrl+V). No automated upload/URL => Google sees a real
+    // browser session and doesn't show the "unusual traffic" captcha.
+    const { clipboard, nativeImage } = require('electron');
+    const img = nativeImage.createFromBuffer(buffer);
+    if (!img.isEmpty()) clipboard.writeImage(img);
+    const r = await openInChrome('https://lens.google.com/');
+    return { success: r.ok, chrome: r.chrome, url: 'https://lens.google.com/' };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -904,7 +902,7 @@ ipcMain.on('fb-adlib:download', (_evt, payload) => {
 // Open a landing page / ad permalink in the user's default browser (Chrome),
 // instead of navigating inside the embedded Facebook window.
 ipcMain.handle('fb-adlib:openExternal', async (_evt, url) => {
-  try { if (url && /^https?:/i.test(url)) await shell.openExternal(url); return { success: true }; }
+  try { if (url && /^https?:/i.test(url)) await openInChrome(url); return { success: true }; }
   catch (e) { return { success: false, error: e.message }; }
 });
 
@@ -1021,7 +1019,7 @@ ipcMain.handle('app:installUpdate', () => {
   // On macOS there's nothing to install in place — open the release page so
   // the user can grab the new .dmg.
   if (IS_MAC) {
-    try { shell.openExternal(RELEASES_PAGE); return true; } catch { return false; }
+    try { openInChrome(RELEASES_PAGE); return true; } catch { return false; }
   }
   if (!autoUpdater) return false;
   try { setImmediate(() => autoUpdater.quitAndInstall()); return true; } catch { return false; }
