@@ -13,7 +13,7 @@ app.setName('MediaGrab');
 let serverProcess = null;
 let mainWin = null;
 
-const SERVER_PORT = 3456;
+const SERVER_PORT = Number(process.env.MG_PORT) || 3456;
 
 // MediaGrab is free: no serial, no activation screen, no license server.
 // The one thing kept from that era is a stable per-machine id, used only to
@@ -162,6 +162,16 @@ ipcMain.handle('shell:showItemInFolder', async (_evt, filePath) => {
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+ipcMain.handle('dialog:pickFolder', async (_evt, defaultPath) => {
+  const r = await dialog.showOpenDialog(mainWin || undefined, {
+    title: 'اختار فولدر التنزيل',
+    defaultPath: typeof defaultPath === 'string' && defaultPath ? defaultPath : undefined,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (r.canceled || !r.filePaths[0]) return { success: false, cancelled: true };
+  return { success: true, path: r.filePaths[0] };
 });
 
 ipcMain.handle('shell:openPath', async (_evt, filePath) => {

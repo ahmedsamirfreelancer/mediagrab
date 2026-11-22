@@ -17,7 +17,7 @@ const app = express();
 const server = http.createServer(app);
 
 // ─── Config ────────────────────────────────────────────────────────────────────
-const PORT = 3456;
+const PORT = Number(process.env.MG_PORT) || 3456;
 const DEFAULT_OUTPUT_DIR = path.join(
   process.env.USERPROFILE || os.homedir(),
   'Downloads',
@@ -764,7 +764,7 @@ function buildYtdlpFormat(quality) {
   if (quality === '720')  return 'bestvideo[height<=720]+bestaudio/best[height<=720]';
   if (quality === '480')  return 'bestvideo[height<=480]+bestaudio/best[height<=480]';
   if (quality === '360')  return 'bestvideo[height<=360]+bestaudio/best[height<=360]';
-  return 'best[ext=mp4]/best';
+  return 'best[ext=mp4]/bestvideo+bestaudio/best';
 }
 
 const YTDLP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -1762,6 +1762,29 @@ app.get('/api/env', (req, res) => {
     home: os.homedir(),
     defaultOutputDir: DEFAULT_OUTPUT_DIR,
   });
+});
+
+// GET /api/folders?base=path — the newest sub-folders of the download folder
+// with how many videos each holds, for the «بينزّل في» quick picker.
+app.get('/api/folders', (req, res) => {
+  try {
+    const base = req.query.base ? validateOutputDir(req.query.base) : DEFAULT_OUTPUT_DIR;
+    if (!fs.existsSync(base)) return res.json({ folders: [] });
+    const media = /\.(mp4|mkv|webm|mov|mp3|m4a|jpg|jpeg|png|webp)$/i;
+    const folders = fs.readdirSync(base, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+      .map((d) => {
+        const dir = path.join(base, d.name);
+        let count = 0;
+        try { count = fs.readdirSync(dir).filter((f) => media.test(f)).length; } catch (e) { console.warn('[folders]', e.message); }
+        return { name: d.name, count, mtime: fs.statSync(dir).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 8);
+    res.json({ folders });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // GET /api/disk-space?dir=path — return free/total bytes for the volume

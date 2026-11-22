@@ -24,29 +24,50 @@
   <div id="settings-modal" class="modal-overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <h2>Settings</h2>
+        <h2>الإعدادات</h2>
         <button class="modal-close" id="settings-close">&times;</button>
       </div>
       <div class="modal-body">
         <div class="setting-group">
-          <label for="output-dir">Output Directory</label>
+          <label for="output-dir">فولدر التحميل</label>
           <div class="input-row">
-            <input type="text" id="output-dir" placeholder="افتراضي: ~/Downloads/MediaGrab" spellcheck="false">
+            <input type="text" id="output-dir" placeholder="الافتراضي: DownloadsMediaGrab" spellcheck="false">
           </div>
         </div>
         <div class="setting-group">
-          <label for="video-quality">Video Quality</label>
+          <label for="video-quality">الجودة</label>
           <select id="video-quality">
-            <option value="best">Best Available</option>
+            <option value="best">أعلى جودة</option>
             <option value="1080">1080p</option>
             <option value="720">720p</option>
             <option value="480">480p</option>
             <option value="360">360p</option>
-            <option value="audio">Audio Only (MP3)</option>
+            <option value="audio">صوت بس (MP3)</option>
           </select>
         </div>
+        <div class="setting-group login-group">
+          <label>تسجيل الدخول للمنصات</label>
+          <div class="login-row">
+            <div class="login-name"><span>إنستجرام</span><strong id="ig-login-status">مش مسجل دخول</strong></div>
+            <div class="login-btns">
+              <button class="btn btn-secondary btn-sm" id="ig-login-btn" type="button">تسجيل دخول Instagram</button>
+              <button class="btn btn-ghost btn-sm" id="ig-import-btn" type="button" title="استيراد كوكيز من ملف .txt">استيراد كوكيز</button>
+              <button class="btn btn-ghost btn-sm" id="ig-logout-btn" type="button" style="display:none">خروج</button>
+            </div>
+          </div>
+          <div class="login-row">
+            <div class="login-name"><span>فيسبوك</span><strong id="fb-login-status">مش مسجل دخول</strong></div>
+            <div class="login-btns">
+              <button class="btn btn-secondary btn-sm" id="fb-login-btn" type="button">تسجيل دخول Facebook</button>
+              <button class="btn btn-ghost btn-sm" id="fb-import-btn" type="button" title="استيراد كوكيز من ملف .txt">استيراد كوكيز</button>
+              <button class="btn btn-ghost btn-sm" id="fb-logout-btn" type="button" style="display:none">خروج</button>
+            </div>
+          </div>
+        </div>
+        <details class="adv">
+          <summary>إعدادات متقدمة</summary>
         <div class="setting-group">
-          <label for="concurrent-downloads">Concurrent Downloads</label>
+          <label for="concurrent-downloads">عدد التحميلات مع بعض</label>
           <select id="concurrent-downloads">
             <option value="1">1</option>
             <option value="2">2</option>
@@ -55,9 +76,9 @@
           </select>
         </div>
         <div class="setting-group">
-          <label for="filename-template">Filename Template</label>
+          <label for="filename-template">شكل اسم الملف</label>
           <input type="text" id="filename-template" placeholder="{title}" spellcheck="false">
-          <span class="setting-hint">Variables: {title}, {author}, {id}, {platform}, {quality}</span>
+          <span class="setting-hint">المتغيّرات: {title}, {author}, {id}, {platform}, {quality}</span>
         </div>
         <div class="setting-group">
           <label for="speed-limit">حد السرعة (KB/s) — 0 = بلا حد</label>
@@ -82,13 +103,13 @@
         <div class="setting-group checkbox-group">
           <label>
             <input type="checkbox" id="auto-detect-platform" checked>
-            <span>Auto-detect platform from URL</span>
+            <span>تعرّف على المنصة من اللينك</span>
           </label>
         </div>
         <div class="setting-group checkbox-group">
           <label>
             <input type="checkbox" id="auto-download">
-            <span>Auto-download after fetching info</span>
+            <span>نزّل تلقائي بعد جلب البيانات</span>
           </label>
         </div>
         <div class="setting-group checkbox-group">
@@ -145,10 +166,11 @@
             <button class="btn btn-primary" id="appupdate-install-btn" style="display:none;">أعد التشغيل وثبّت التحديث</button>
           </div>
         </div>
+        </details>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="settings-reset">Reset Defaults</button>
-        <button class="btn btn-primary" id="settings-save">Save Settings</button>
+        <button class="btn btn-secondary" id="settings-reset">رجّع الافتراضي</button>
+        <button class="btn btn-primary" id="settings-save">حفظ</button>
       </div>
     </div>
   </div>
@@ -224,139 +246,72 @@
   <!-- App Container -->
   <div class="app">
     <header class="header">
-      <div class="header-left">
-        <div class="logo">
-          <svg class="logo-icon" viewBox="0 0 32 32" width="32" height="32">
-            <defs>
-              <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:#6c5ce7"/>
-                <stop offset="100%" style="stop-color:#a855f7"/>
-              </linearGradient>
-            </defs>
-            <rect rx="8" width="32" height="32" fill="url(#logoGrad)"/>
-            <path d="M16 8 L16 20 M11 16 L16 21 L21 16" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-            <line x1="10" y1="24" x2="22" y2="24" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-          </svg>
-          <h1 class="logo-text">MediaGrab</h1>
-        </div>
-        <span class="version-badge" id="version-badge">v1.1.1</span>
+      <div class="logo">
+        <svg class="logo-icon" viewBox="0 0 32 32" width="34" height="34">
+          <defs>
+            <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#6c5ce7"/>
+              <stop offset="100%" style="stop-color:#a855f7"/>
+            </linearGradient>
+          </defs>
+          <rect rx="8" width="32" height="32" fill="url(#logoGrad)"/>
+          <path d="M16 8 L16 20 M11 16 L16 21 L21 16" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          <line x1="10" y1="24" x2="22" y2="24" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+        <h1 class="logo-text">MediaGrab</h1>
       </div>
-      <div class="header-right">
-        <div class="connection-status" id="connection-status">
-          <span class="status-dot"></span>
-          <span class="status-text">جاري الاتصال…</span>
+      <div class="menu-wrap">
+        <button class="icon-btn" id="menu-btn" title="المزيد" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+        </button>
+        <div class="menu hidden" id="menu" role="menu">
+          <button class="menu-item" id="settings-btn" role="menuitem">⚙️ <span>الإعدادات</span></button>
+          <button class="menu-item" id="stats-btn" role="menuitem">📊 <span id="stats-menu-label">نزّلت النهارده: —</span></button>
+          <div class="menu-sep"></div>
+          <button class="menu-item" id="adlib-menu-btn" role="menuitem">📢 <span>مكتبة الإعلانات</span></button>
+          <button class="menu-item" id="batch-btn" role="menuitem">📋 <span>تحميل دفعة روابط</span></button>
+          <button class="menu-item" id="img-search-btn" role="menuitem" title="انسخ صورة المنتج الأول (أو Ctrl+V)">🖼️ <span>بحث بصورة</span></button>
+          <button class="menu-item" id="open-home-btn" role="menuitem">🌐 <span id="open-home-label">افتح المنصة من غير بحث</span></button>
+          <button class="menu-item" id="notes-btn" role="menuitem">📝 <span>منتجات الكرييتفات</span></button>
         </div>
-        <button class="icon-btn" id="stats-btn" title="احصائيات">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        </button>
-        <button class="icon-btn" id="notes-btn" title="قائمة منتجات الكرييتفات">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        </button>
-        <button class="icon-btn" id="settings-btn" title="الاعدادات">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
       </div>
+      <div class="connection-status" id="connection-status" style="display:none"><span class="status-dot"></span><span class="status-text"></span></div>
     </header>
 
 
-    <nav class="platform-tabs">
-      <button class="platform-tab active" data-platform="tiktok">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1v-3.48a6.37 6.37 0 0 0-.79-.05A6.34 6.34 0 0 0 3.15 15a6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V8.81a8.24 8.24 0 0 0 4.76 1.51v-3.44a4.85 4.85 0 0 1-1-.19z"/></svg>
-        <span>TikTok</span>
-      </button>
-      <button class="platform-tab" data-platform="youtube">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-        <span>YouTube</span>
-      </button>
-      <button class="platform-tab" data-platform="instagram">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>
-        <span>Instagram</span>
-      </button>
-      <button class="platform-tab" data-platform="facebook">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-        <span>Facebook</span>
-      </button>
-      <button class="platform-tab" data-platform="pinterest">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 0C5.373 0 0 5.372 0 12c0 5.084 3.163 9.426 7.627 11.174-.105-.949-.2-2.405.042-3.441.218-.937 1.407-5.965 1.407-5.965s-.359-.719-.359-1.782c0-1.668.967-2.914 2.171-2.914 1.023 0 1.518.769 1.518 1.69 0 1.029-.655 2.568-.994 3.995-.283 1.194.599 2.169 1.777 2.169 2.133 0 3.772-2.249 3.772-5.495 0-2.873-2.064-4.882-5.012-4.882-3.414 0-5.418 2.561-5.418 5.207 0 1.031.397 2.138.893 2.738a.36.36 0 0 1 .083.345c-.091.378-.293 1.194-.333 1.361-.052.22-.174.267-.402.161-1.499-.698-2.436-2.889-2.436-4.649 0-3.785 2.75-7.262 7.929-7.262 4.163 0 7.398 2.967 7.398 6.931 0 4.136-2.608 7.464-6.227 7.464-1.216 0-2.359-.632-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.349-1.492 3.146C9.57 23.812 10.763 24 12 24c6.627 0 12-5.373 12-12 0-6.628-5.373-12-12-12z"/></svg>
-        <span>Pinterest</span>
-      </button>
-      <button class="platform-tab" data-platform="adlibrary">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
-        <span>مكتبة الإعلانات</span>
-      </button>
-    </nav>
 
     <main class="main-content">
       <!-- The launcher: one box. A video link downloads; anything else opens
            the real site in its own window with download buttons on it. -->
       <section class="launcher" id="launcher">
-        <h1 class="launch-title">افتح <span id="launch-platform">تيك توك</span> جوّه البرنامج</h1>
-        <p class="launch-sub">الموقع بيفتح في شباك لوحده، وكل فيديو عليه زرار تحميل</p>
-
-
-        <div class="ig-login-banner" id="ig-login-banner" style="display:none; padding:12px 14px; margin-bottom:10px; border-radius:10px; background:linear-gradient(135deg,#7c3aed,#ec4899); color:#fff; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-          <div style="flex:1; min-width:200px; font-size:13px;">
-            <strong id="ig-login-status">مش مسجل دخول</strong>
-            <div style="opacity:0.85; font-size:12px; margin-top:2px;">سجل دخول من داخل التطبيق، أو سجل دخول Instagram على Chrome (واقفل Chrome قبل ما تبحث) — التطبيق هيقرا الكوكيز تلقائياً.</div>
-          </div>
-          <button class="btn btn-primary" id="ig-login-btn" style="background:#fff; color:#7c3aed; padding:8px 18px;">
-            تسجيل دخول Instagram
-          </button>
-          <button class="btn" id="ig-import-btn" title="استيراد كوكيز من ملف .txt مصدّر من امتداد المتصفح" style="background:rgba(255,255,255,0.15); color:#fff; padding:8px 14px;">
-            استيراد كوكيز
-          </button>
-          <button class="btn" id="ig-logout-btn" style="display:none; background:rgba(255,255,255,0.15); color:#fff; padding:8px 14px;">
-            خروج
-          </button>
-        </div>
-        <!-- Facebook in-app login banner (shown only on Facebook tab) -->
-        <div class="fb-login-banner" id="fb-login-banner" style="display:none; padding:12px 14px; margin-bottom:10px; border-radius:10px; background:linear-gradient(135deg,#1877f2,#0a48a3); color:#fff; align-items:center; gap:12px; flex-wrap:wrap;">
-          <div style="flex:1; min-width:200px; font-size:13px;">
-            <strong id="fb-login-status">مش مسجل دخول</strong>
-            <div style="opacity:0.85; font-size:12px; margin-top:2px;">سجل دخول Facebook داخل التطبيق عشان البحث وتنزيل الفيديوهات الخاصة يشتغل.</div>
-          </div>
-          <button class="btn btn-primary" id="fb-login-btn" style="background:#fff; color:#1877f2; padding:8px 18px;">
-            تسجيل دخول Facebook
-          </button>
-          <button class="btn" id="fb-import-btn" title="استيراد كوكيز من ملف .txt مصدّر من امتداد المتصفح" style="background:rgba(255,255,255,0.15); color:#fff; padding:8px 14px;">
-            استيراد كوكيز
-          </button>
-          <button class="btn" id="fb-logout-btn" style="display:none; background:rgba(255,255,255,0.15); color:#fff; padding:8px 14px;">
-            خروج
-          </button>
-        </div>
-
+        <h2 class="launch-title">الصق اللينك</h2>
         <div class="launch-box">
-          <input type="text" id="main-input" placeholder="لينك فيديو — أو اكتب اللي بتدوّر عليه" spellcheck="false" autocomplete="off">
-          <button class="btn btn-ghost" id="paste-btn" title="لصق من الحافظة">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-          <button class="btn btn-primary btn-go" id="go-btn">
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <span id="go-label">افتح</span>
-          </button>
+          <input type="text" id="main-input" placeholder="أو كلمة بحث ‎https://…‎" spellcheck="false" autocomplete="off">
+          <button class="btn btn-primary btn-go" id="go-btn"><span id="go-label">نزّل</span></button>
         </div>
-
-        <p class="launch-hint" id="launch-hint">لينك فيديو جاهز بينزّل على طول · أي كلمة تانية بتفتح الموقع</p>
-
+        <p class="launch-hint" id="launch-hint"></p>
+        <div class="badges" id="badges">
+          <button class="badge" data-platform="tiktok" type="button">تيك توك</button>
+          <button class="badge" data-platform="youtube" type="button">يوتيوب</button>
+          <button class="badge" data-platform="instagram" type="button">إنستجرام</button>
+          <button class="badge" data-platform="facebook" type="button">فيسبوك</button>
+          <button class="badge" data-platform="pinterest" type="button">بنترست</button>
+        </div>
         <div class="launch-folder">
-          <label for="subfolder-input">📁 ينزّل في مجلد:</label>
-          <input type="text" id="subfolder-input" placeholder="اسم المجلد (اختياري)" spellcheck="false">
+          <span>بينزّل في:</span>
+          <div class="folder-wrap">
+            <button class="folder-chip" id="folder-chip" type="button" title="غيّر الفولدر (Ctrl+L)" aria-haspopup="true" aria-expanded="false"><span class="chip-ico">📁</span><span id="folder-chip-name">—</span><span class="chip-caret">⌄</span></button>
+            <div class="folder-pop hidden" id="folder-pop" role="dialog">
+              <input type="text" id="subfolder-input" placeholder="اسم فولدر جديد واضغط Enter" spellcheck="false" autocomplete="off">
+              <button class="pop-suggest hidden" id="folder-suggest" type="button"></button>
+              <div class="pop-title">آخر الفولدرات</div>
+              <div class="pop-list" id="folder-list"></div>
+              <div class="pop-sep"></div>
+              <button class="pop-action" id="folder-pick" type="button">📂 <span>اختار مكان تاني…</span></button>
+              <button class="pop-action" id="folder-open" type="button">↗ <span>افتح الفولدر الحالي</span></button>
+            </div>
+          </div>
           <span class="folder-path" id="folder-path"></span>
-        </div>
-
-        <div class="launch-actions">
-          <button class="btn btn-secondary" id="open-home-btn">
-            <span id="open-home-label">افتح تيك توك من غير بحث</span>
-          </button>
-          <button class="btn btn-secondary" id="batch-btn" title="الصق عدة روابط وحمّلهم دفعة واحدة في مجلد واحد">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-            <span>تحميل دفعة روابط</span>
-          </button>
-          <button class="btn btn-secondary" id="img-search-btn" title="الصق صورة منتج (Ctrl+V) للبحث عن اسمه بالانجليزي في جوجل">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            <span>بحث بصورة</span>
-          </button>
         </div>
       </section>
 
@@ -368,6 +323,7 @@
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
               <h2>مكتبة إعلانات فيسبوك</h2>
             </div>
+            <button class="btn btn-ghost btn-sm" id="adlib-back-btn" type="button">← رجوع</button>
             <p class="adlib-sub">جسّس على إعلانات أي منافس — فلتر بالدولة والنوع، وحمّل الإبداعات (صورة/فيديو) بدوسة زر. بيانات عامة بتشتغل من جهازك مباشرة.</p>
           </div>
 
@@ -467,13 +423,9 @@
       <!-- Download Queue -->
       <section class="queue-section" id="queue-section">
         <div class="section-header">
-          <h2>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            التحميلات
-            <span class="queue-count" id="queue-count"></span>
-          </h2>
+          <h2>التحميلات <span class="queue-count" id="queue-count"></span></h2>
           <div class="section-header-actions">
-            <button class="btn btn-danger btn-sm" id="stop-all-btn">ايقاف الكل</button>
+            <button class="btn btn-danger btn-sm hidden" id="stop-all-btn">إيقاف الكل</button>
             <button class="btn btn-ghost btn-sm" id="clear-completed-btn">مسح المكتمل</button>
           </div>
         </div>
