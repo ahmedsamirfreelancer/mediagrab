@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * ONE popup system for every platform.
@@ -62,6 +62,7 @@ function serverJson(method, route, body) {
 
 function createWindow(key, p, url, { guest = false } = {}) {
   const win = new BrowserWindow({
+    icon: require('path').join(__dirname, '..', 'server', 'public', 'icon.png'),
     width: p.width || 1200,
     height: p.height || 880,
     title: guest ? `${p.title} (زائر — من غير تسجيل دخول)` : p.title,
@@ -154,6 +155,12 @@ function registerEmbeds(options) {
     const key = idsPlatform(evt);
     await serverJson('DELETE', `/api/downloaded-ids?platform=${encodeURIComponent(key)}`);
     return { success: true };
+  });
+
+  // How many downloads are in flight — drives the toolbar's 3 / 12 counter.
+  ipcMain.handle('embed:active', async () => {
+    const r = await serverJson('GET', '/api/active');
+    return { active: (r && Array.isArray(r.active)) ? r.active.length : 0 };
   });
 
   ipcMain.handle('embed:stopAll', async () => {

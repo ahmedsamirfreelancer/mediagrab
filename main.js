@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, shell, Menu, ipcMain, session } = require('electron');
+﻿const { app, BrowserWindow, dialog, shell, Menu, ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
@@ -95,6 +95,7 @@ async function waitForServer(retries = 40) {
 
 function createMainWindow() {
   mainWin = new BrowserWindow({
+    icon: path.join(__dirname, 'server', 'public', 'icon.png'),
     width: 1400,
     height: 900,
     title: 'MediaGrab',

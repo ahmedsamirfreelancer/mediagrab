@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Icons for the buttons MediaGrab injects into other sites' pages.
  *
  * Trusted Types: youtube / facebook / instagram forbid `innerHTML`, so every
@@ -30,6 +30,8 @@ const PATHS = {
   'arrow-right': ['M5 12h14', 'm13 6 6 6-6 6'],
   video: ['M23 7l-7 5 7 5z', 'M3 5h11a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z'],
   camera: ['M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z', 'M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'],
+  more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
+  chevron: ['m6 9 6 6 6-6'],
   clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2'],
 };
 

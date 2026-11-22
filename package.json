@@ -1,6 +1,6 @@
 {
   "name": "mediagrab",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "MediaGrab — Multi-platform video downloader",
   "main": "main.js",
   "author": "Ahmed",
@@ -74,6 +74,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -126,6 +127,11 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "MediaGrab",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
       "installerLanguages": [
         "en_US",
         "ar_SA"

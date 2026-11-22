@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * The download toolbar every popup wears.
@@ -23,7 +23,7 @@
  */
 
 const { ipcRenderer } = require('electron');
-const { setLabel, getLabel } = require('./preload-icons.js');
+const { setLabel, getLabel, svgIcon } = require('./preload-icons.js');
 
 const BTN_CLASS = 'mg-dl-btn';
 const BTN_LABEL = '⬇ تحميل';
@@ -114,10 +114,7 @@ module.exports = function initEmbed(rules) {
 
   function selCount() { return $$('.mg-sel:checked').length; }
 
-  function updateSelCount() {
-    const el = $('#mg-sel-btn');
-    if (el) setLabel(el, '⬇ حمّل المحدد (' + selCount() + ')');
-  }
+  function updateSelCount() { refreshMain(); }
 
   function downloadSelected() {
     const checked = $$('.mg-sel:checked');
@@ -210,7 +207,7 @@ module.exports = function initEmbed(rules) {
     s.textContent =
       '.mg-sel{display:none!important;}' +
       'html.mg-selecting .mg-sel{display:inline-block!important;}' +
-      '.mg-hide-btns .mg-dl-btn,.mg-hide-btns .mg-sel{display:none!important;}';
+      '.mg-hide-btns .mg-dl-btn,.mg-hide-btns .mg-sel{display:none!important;}' + CSS;
     (document.head || document.documentElement).appendChild(s);
   }
 
@@ -283,99 +280,269 @@ module.exports = function initEmbed(rules) {
     return b;
   }
 
-  function folderRow() {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;';
-    // Built node by node, never innerHTML: YouTube (and Facebook) enforce
-    // Trusted Types, where any innerHTML assignment throws and takes the
-    // whole toolbar with it.
-    row.appendChild(mkEl('strong', 'MediaGrab', 'color:#a855f7;font-size:15px;'));
-    row.appendChild(mkEl('span', '📁 ينزّل في:', 'opacity:.85;'));
+  /* ── the toolbar: one slim row ────────────────────────────────────── */
 
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'flex:1;min-width:280px;display:flex;align-items:center;background:#1c1a2b;'
-      + 'border:1px solid #3a3754;border-radius:8px;padding:2px 6px;direction:ltr;';
-    const base = document.createElement('span');
-    base.id = 'mg-path-base';
-    base.style.cssText = 'color:#8b93b8;font-size:12px;padding:4px;white-space:nowrap;max-width:55%;'
-      + 'overflow:hidden;text-overflow:ellipsis;';
+  const CSS = [
+    '#mg-toolbar{position:fixed;top:0;left:0;right:0;max-height:38vh;z-index:2147483647;color:#e9e7f5;',
+    'background:rgba(21,19,31,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);',
+    'border-bottom:1px solid rgba(124,92,255,.22);box-shadow:0 2px 14px rgba(0,0,0,.45);direction:rtl;',
+    "font-family:'Segoe UI',Tahoma,sans-serif;font-size:13px;line-height:1.2;}",
+    '#mg-toolbar *{box-sizing:border-box;}',
+    '#mg-row{height:48px;padding:0 12px;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:10px;position:relative;}',
+    '#mg-toolbar .mg-grp{display:flex;align-items:center;gap:6px;min-width:0;}',
+    '#mg-toolbar .mg-left{justify-self:end;}',
+    '#mg-toolbar .mg-mark{width:26px;height:26px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;',
+    'color:#fff;background:linear-gradient(135deg,#7c5cff,#a855f7);}',
+    '#mg-toolbar button{font:inherit;cursor:pointer;border:none;outline:none;}',
+    '#mg-toolbar .mg-chip{display:flex;align-items:center;gap:6px;height:32px;max-width:100%;padding:0 10px;border-radius:9px;',
+    'background:rgba(255,255,255,.06);color:#e9e7f5;}',
+    '#mg-toolbar .mg-chip b{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;direction:ltr;}',
+    '#mg-toolbar .mg-chip span{opacity:.6;white-space:nowrap;}',
+    '#mg-toolbar .mg-chip svg,#mg-toolbar .mg-ib svg,#mg-toolbar .mg-txt svg{margin:0!important;}',
+    '#mg-toolbar .mg-ib{width:32px;height:32px;border-radius:9px;background:transparent;color:#c3c1d6;display:flex;align-items:center;justify-content:center;}',
+    '#mg-toolbar .mg-ib:hover,#mg-toolbar .mg-chip:hover,#mg-toolbar .mg-txt:hover{background:rgba(255,255,255,.12);color:#fff;}',
+    '#mg-toolbar .mg-txt{height:32px;padding:0 10px;border-radius:9px;background:transparent;color:#a3a1b8;display:flex;align-items:center;gap:6px;white-space:nowrap;}',
+    '#mg-toolbar .mg-txt.on{background:rgba(124,92,255,.22);color:#fff;}',
+    '#mg-toolbar .mg-primary{height:34px;padding:0 18px;border-radius:10px;color:#fff;font-weight:700;display:flex;align-items:center;gap:7px;',
+    'background:linear-gradient(135deg,#7c5cff,#9b5cf6);white-space:nowrap;box-shadow:0 2px 10px rgba(124,92,255,.35);}',
+    '#mg-toolbar .mg-primary:hover{filter:brightness(1.12);}',
+    '#mg-toolbar .mg-primary[disabled]{opacity:.4;cursor:default;filter:none;box-shadow:none;}',
+    '#mg-toolbar .mg-primary svg{margin:0!important;}',
+    '#mg-toolbar .mg-cnt{font-weight:700;color:#cfc6ff;white-space:nowrap;direction:ltr;}',
+    '#mg-toolbar .mg-pop{display:none;position:absolute;top:50px;z-index:2;min-width:230px;padding:10px;border-radius:12px;',
+    'background:#1b1830;border:1px solid rgba(124,92,255,.3);box-shadow:0 10px 30px rgba(0,0,0,.55);flex-direction:column;gap:8px;}',
+    '#mg-toolbar .mg-pop.open{display:flex;}',
+    '#mg-toolbar .mg-pop input{width:100%;height:34px;padding:0 10px;border-radius:8px;border:1px solid #3a3754;background:#120f1d;color:#fff;direction:ltr;font-size:13px;font-weight:600;}',
+    '#mg-toolbar .mg-pop small{color:#8b93b8;direction:ltr;word-break:break-all;}',
+    '#mg-toolbar .mg-item{height:34px;padding:0 10px;border-radius:8px;background:transparent;color:#e9e7f5;display:flex;align-items:center;gap:8px;text-align:start;}',
+    '#mg-toolbar .mg-item:hover{background:rgba(255,255,255,.1);}',
+    '@media (max-width:820px){#mg-toolbar .mg-chip span{display:none}#mg-toolbar .mg-chip b{max-width:90px}#mg-toolbar .mg-primary{padding:0 12px}}',
+    '@media (max-width:600px){#mg-row{padding:0 8px;gap:6px}#mg-toolbar #mg-seltoggle{font-size:0;padding:0 8px}#mg-toolbar .mg-chip b{max-width:60px}}',
+    '#mg-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:transparent;display:none;}',
+    '#mg-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#7c5cff,#a855f7);transition:width .4s;}',
+  ].join('');
+
+  function iconBtn(name, title, onClick) {
+    const b = document.createElement('button');
+    b.className = 'mg-ib';
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    b.appendChild(svgIcon(name, 18));
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function textBtn(cls, label, title, onClick) {
+    const b = document.createElement('button');
+    b.className = cls;
+    b.title = title;
+    setLabel(b, label);
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function popover(side) {
+    const p = document.createElement('div');
+    p.className = 'mg-pop';
+    p.style[side] = '12px';
+    return p;
+  }
+
+  function closePops(except) {
+    for (const p of $$('#mg-toolbar .mg-pop')) if (p !== except) p.classList.remove('open');
+  }
+
+  function folderChip() {
+    const chip = document.createElement('button');
+    chip.className = 'mg-chip';
+    chip.id = 'mg-chip';
+    chip.appendChild(svgIcon('folder', 16));
+    chip.appendChild(mkEl('span', 'ينزّل في'));
+    chip.appendChild(mkEl('b', defaultFolder || 'التحميلات'));
+    chip.appendChild(svgIcon('chevron', 14));
+    return chip;
+  }
+
+  function syncChip() {
+    const chip = $('#mg-chip');
+    if (!chip) return;
+    const name = currentFolder();
+    chip.querySelector('b').textContent = name || 'التحميلات';
+    chip.title = (baseDir ? baseDir + '\\' : '') + name;
+    const small = $('#mg-pop-path');
+    if (small) small.textContent = chip.title;
+  }
+
+  function folderPop() {
+    const pop = popover('right');
+    pop.id = 'mg-pop-folder';
     const input = document.createElement('input');
     input.id = 'mg-folder';
     input.value = defaultFolder;
     input.placeholder = 'اسم المجلد';
-    input.style.cssText = 'flex:1;min-width:120px;padding:5px 8px;border:none;background:transparent;'
-      + 'color:#fff;direction:ltr;font-size:13px;font-weight:600;outline:none;';
-    wrap.appendChild(base);
-    wrap.appendChild(input);
-    row.appendChild(wrap);
-    row.appendChild(mkBtn('📂 فتح', 'يفتح مجلد التحميل', '#2563eb',
+    input.addEventListener('input', syncChip);
+    const path = document.createElement('small');
+    path.id = 'mg-pop-path';
+    pop.appendChild(mkEl('span', 'اسم مجلد التحميل', 'color:#a3a1b8;'));
+    pop.appendChild(input);
+    pop.appendChild(path);
+    pop.appendChild(textBtn('mg-item', '📂 فتح المجلد', 'يفتح مجلد التحميل',
       () => ipcRenderer.invoke('embed:openFolder', currentFolder())));
-    return row;
+    return pop;
   }
 
-  function actionRow() {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+  /* what the one big button does depends on what is on screen */
 
-    const all = mkBtn('⬇ حمّل كل الظاهر', 'ينزّل كل اللي ظاهر قدامك دلوقتي', '#7c3aed', () => {
-      const n = allButtons().length;
-      if (!n) return;
-      if (!confirm('هتحمّل كل الـ ' + n + ' اللي ظاهرين. متأكد؟')) return;
-      flash(all, '✓ ضفنا ' + downloadAllVisible(), '⬇ حمّل كل الظاهر');
-    });
-    row.appendChild(all);
+  function mainAction() {
+    const sel = document.documentElement.classList.contains('mg-selecting');
+    if (sel && selCount() > 0) return { label: '⬇ حمّل المحدد (' + selCount() + ')', run: downloadSelected };
+    let open = null;
+    try { open = R.current(); } catch {}
+    if (open && open.url) return { label: '⬇ حمّل', run: () => queue(open) };
+    const n = allButtons().length;
+    if (n > 1) return { label: '⬇ حمّل الكل (' + n + ')', run: downloadAllVisible, confirm: 'هتحمّل كل الـ ' + n + ' اللي ظاهرين. متأكد؟' };
+    if (n === 1) return { label: '⬇ حمّل', run: downloadAllVisible };
+    return null;
+  }
 
-    const sel = mkBtn('⬇ حمّل المحدد (0)', 'يحمّل اللي علّمت عليه (✓ في الركن)', '#9333ea', () => {
-      const n = downloadSelected();
-      if (n > 0) { setLabel(sel, '✓ ضفنا ' + n); setTimeout(updateSelCount, 2500); }
-    });
-    sel.id = 'mg-sel-btn';
-    sel.style.display = 'none';
+  function refreshMain() {
+    const b = $('#mg-main');
+    if (!b) return;
+    const a = mainAction();
+    b.disabled = !a;
+    const label = a ? a.label : '⬇ حمّل';
+    if (getLabel(b) !== label) setLabel(b, label);
+  }
 
-    const toggle = mkBtn('☑ تحديد', 'يفعّل وضع التحديد عشان تعلّم على كذا حاجة وتحمّلهم مرة واحدة', '#0ea5e9', () => {
+  function runMain() {
+    const a = mainAction();
+    if (!a) return;
+    if (a.confirm && !confirm(a.confirm)) return;
+    const n = a.run();
+    if (n) track(n);
+  }
+
+  function selectToggle() {
+    const t = textBtn('mg-txt', '☑ تحديد', 'تحديد كذا حاجة وتحميلهم مرة واحدة', () => {
       const on = document.documentElement.classList.toggle('mg-selecting');
-      setLabel(toggle, on ? '✓ خلّصت تحديد' : '☑ تحديد');
-      toggle.style.background = on ? '#0369a1' : '#0ea5e9';
-      sel.style.display = on ? '' : 'none';
-      if (!on) { for (const cb of $$('.mg-sel:checked')) cb.checked = false; updateSelCount(); }
+      t.classList.toggle('on', on);
+      if (!on) for (const cb of $$('.mg-sel:checked')) cb.checked = false;
+      refreshMain();
     });
-    row.appendChild(toggle);
-    row.appendChild(sel);
+    t.id = 'mg-seltoggle';
+    return t;
+  }
 
-    row.appendChild(mkBtn('↺ صفّر العلامات', 'يشيل كل العلامات الخضرا ويرجّع الأزرار «تحميل»', '#374151', resetMarks));
+  function menuPop() {
+    const pop = popover('left');
+    pop.id = 'mg-pop-menu';
+    pop.appendChild(textBtn('mg-item', '↺ صفّر العلامات', 'يشيل كل العلامات الخضرا ويرجّع الأزرار «تحميل»',
+      () => { closePops(); resetMarks(); }));
+    return pop;
+  }
 
-    const stop = mkBtn('⏹ إيقاف', 'يوقف كل التحميلات الجارية', '#b91c1c', async () => {
-      try {
-        const r = await ipcRenderer.invoke('embed:stopAll');
-        flash(stop, '⏹ وقفنا ' + ((r && r.cancelled) || 0), '⏹ إيقاف');
-      } catch {}
+  /* progress: «3 / 12» + a hairline bar, only while something is downloading */
+
+  let total = 0, lastQueued = 0, idlePolls = 0, pollTimer = null;
+
+  function showProgress(done) {
+    const cnt = $('#mg-cnt'), stop = $('#mg-stop'), bar = $('#mg-bar');
+    if (!cnt) return;
+    const on = total > 0;
+    cnt.style.display = on ? '' : 'none';
+    stop.style.display = on ? '' : 'none';
+    bar.style.display = on ? 'block' : 'none';
+    if (on) {
+      cnt.textContent = Math.min(done, total) + ' / ' + total;
+      bar.firstChild.style.width = Math.round(100 * Math.min(done, total) / total) + '%';
+    }
+  }
+
+  async function poll() {
+    let active = 0;
+    try { active = (await ipcRenderer.invoke('embed:active')).active || 0; } catch {}
+    const settled = Date.now() - lastQueued > 4000;
+    idlePolls = (active === 0 && settled) ? idlePolls + 1 : 0;
+    showProgress(total - active);
+    if (idlePolls >= 2) {
+      showProgress(total);
+      clearInterval(pollTimer); pollTimer = null;
+      setTimeout(() => { if (!pollTimer) { total = 0; showProgress(0); } }, 2500);
+    }
+  }
+
+  function track(n) {
+    total += n;
+    lastQueued = Date.now();
+    idlePolls = 0;
+    showProgress(0);
+    if (!pollTimer) pollTimer = setInterval(poll, 1000);
+  }
+
+  async function stopAll() {
+    try { await ipcRenderer.invoke('embed:stopAll'); } catch {}
+    total = 0; idlePolls = 0;
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    showProgress(0);
+  }
+
+  function toolbarRow() {
+    const row = document.createElement('div');
+    row.id = 'mg-row';
+
+    const right = document.createElement('div');
+    right.className = 'mg-grp';
+    const mark = document.createElement('div');
+    mark.className = 'mg-mark';
+    const mi = svgIcon('download', 16); mi.style.margin = '0'; mi.setAttribute('stroke-width', '2.6');
+    mark.appendChild(mi);
+    mark.title = 'MediaGrab';
+    right.appendChild(mark);
+    const chip = folderChip();
+    right.appendChild(chip);
+
+    const mid = document.createElement('div');
+    mid.className = 'mg-grp';
+    const main = textBtn('mg-primary', '⬇ حمّل', 'ينزّل اللي ظاهر قدامك', runMain);
+    main.id = 'mg-main';
+    main.disabled = true;
+    mid.appendChild(main);
+    mid.appendChild(selectToggle());
+    const cnt = document.createElement('span');
+    cnt.className = 'mg-cnt'; cnt.id = 'mg-cnt'; cnt.style.display = 'none';
+    mid.appendChild(cnt);
+    const stop = iconBtn('stop', 'إيقاف التحميلات الجارية', stopAll);
+    stop.id = 'mg-stop'; stop.style.display = 'none';
+    mid.appendChild(stop);
+
+    const left = document.createElement('div');
+    left.className = 'mg-grp mg-left';
+    for (const extra of (R.buttons({ mkBtn, queue, currentFolder, btnStyle }) || [])) {
+      extra.style.cssText = 'display:none;';
+      extra.className = 'mg-txt';
+      left.appendChild(extra);
+    }
+    const more = iconBtn('more', 'المزيد', (e) => {
+      e.stopPropagation();
+      const p = $('#mg-pop-menu'); const was = p.classList.contains('open');
+      closePops(); p.classList.toggle('open', !was);
     });
-    row.appendChild(stop);
+    left.appendChild(more);
+    left.appendChild(iconBtn('arrow-right', 'رجوع للصفحة اللي قبلها', () => { try { history.back(); } catch {} }));
+    // A real close: on macOS a full-screen window hides the traffic lights.
+    left.appendChild(iconBtn('x', 'إغلاق النافذة', () => ipcRenderer.invoke('embed:close').catch(() => {})));
 
-    // Shown only while one post is open — downloads that exact post.
-    const cur = mkBtn('⬇ حمّل المفتوح', 'يحمّل اللي إنت فاتحه دلوقتي', '#16a34a', () => {
-      let item = null;
-      try { item = R.current(); } catch {}
-      if (!item || !item.url) return;
-      queue(item);
-      flash(cur, '✓ في الطابور', '⬇ حمّل المفتوح');
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const p = $('#mg-pop-folder'); const was = p.classList.contains('open');
+      closePops(); p.classList.toggle('open', !was); syncChip();
     });
-    cur.id = 'mg-current-btn';
-    cur.style.display = 'none';
-    row.appendChild(cur);
 
-    for (const extra of (R.buttons({ mkBtn, queue, currentFolder, btnStyle }) || [])) row.appendChild(extra);
-
-    const spacer = document.createElement('span');
-    spacer.style.flex = '1';
-    row.appendChild(spacer);
-
-    row.appendChild(mkBtn('✕ رجوع', 'يرجّعك للصفحة اللي قبلها', '#dc2626',
-      () => { try { history.back(); } catch {} }));
-    // A real close: on macOS a full-screen window hides the traffic lights, so
-    // without this there is no visible way out of the window.
-    row.appendChild(mkBtn('✕ إغلاق النافذة', 'يقفل النافذة ويرجّعك للبرنامج', '#7f1d1d',
-      () => ipcRenderer.invoke('embed:close').catch(() => {})));
+    row.appendChild(right); row.appendChild(mid); row.appendChild(left);
+    row.appendChild(folderPop()); row.appendChild(menuPop());
+    const bar = document.createElement('div');
+    bar.id = 'mg-bar'; bar.appendChild(document.createElement('i'));
+    row.appendChild(bar);
     return row;
   }
 
@@ -422,12 +589,13 @@ module.exports = function initEmbed(rules) {
     if ($('#mg-toolbar') || !document.body) return;
     const bar = document.createElement('div');
     bar.id = 'mg-toolbar';
-    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;max-height:38vh;overflow-y:auto;z-index:2147483647;background:#15131f;'
-      + 'color:#fff;display:flex;flex-direction:column;gap:9px;padding:11px 16px;font-family:sans-serif;'
-      + 'font-size:13px;box-shadow:0 2px 16px rgba(0,0,0,.7);direction:rtl;border-bottom:1px solid #2a2740;';
-    bar.appendChild(folderRow());
-    bar.appendChild(actionRow());
-    if (R.rescue) bar.appendChild(rescueRow());
+    bar.appendChild(toolbarRow());
+    if (R.rescue) {
+      const rescue = rescueRow();
+      rescue.style.margin = '0 12px 8px';
+      bar.appendChild(rescue);
+    }
+    document.addEventListener('click', () => closePops(), true);
     (document.body || document.documentElement).appendChild(bar);
 
     pushPageDown();
@@ -435,8 +603,7 @@ module.exports = function initEmbed(rules) {
     ipcRenderer.invoke('embed:baseDir')
       .then((b) => {
         baseDir = b || '';
-        const span = $('#mg-path-base');
-        if (span) span.textContent = baseDir + '\\';
+        syncChip();
       })
       .catch(() => {});
   }
@@ -455,8 +622,7 @@ module.exports = function initEmbed(rules) {
       document.documentElement.classList.toggle('mg-hide-btns', !listing);
       let open = null;
       try { open = R.current(); } catch {}
-      const cur = $('#mg-current-btn');
-      if (cur) cur.style.display = (open && open.url) ? '' : 'none';
+      refreshMain();
       if (listing) { for (const card of (R.cards() || [])) attach(card); }
       if (R.rescue) updateRescue(listing);
       R.onTick();

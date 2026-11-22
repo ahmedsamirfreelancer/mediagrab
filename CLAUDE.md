@@ -1,4 +1,4 @@
-# MediaGrab
+﻿# MediaGrab
 
 تطبيق Electron لتنزيل الفيديوهات من TikTok / YouTube / Instagram / Facebook / Pinterest، بواجهة عربية. التشغيل محلياً بـ `npm start` من `E:\ai\01-active\mediagrab`.
 
@@ -38,7 +38,7 @@ E:\ai\01-active\mediagrab\
 
 1. الواجهة بتنادي `electronAPI.embed.open(platform, { query | url, base })`.
 2. `embed/windows.js` بيفتح `BrowserWindow` بجلسة المنصة + الـpreload بتاعها.
-3. `preload-embed-core.js` بيحقن الشريط (مجلد الحفظ · حمّل كل الظاهر · تحديد · إيقاف · فتح المجلد) وزرار على كل بوست.
+3. `preload-embed-core.js` بيحقن الشريط (سطر واحد نحيف 48px: شارة «ينزّل في» + زر «حمّل» الرئيسي + تحديد + عدّاد التقدّم · ⋯ فيها صفّر العلامات) وزرار على كل بوست.
 4. أي ضغطة بتبعت `embed:download` بشكل واحد: `{ items:[{url,id,kind}], folder }`.
 5. `main.js` بيمرّرها للنافذة الرئيسية → الطابور العادي → yt-dlp.
 
