@@ -1432,3 +1432,29 @@ textarea { background: var(--bg-input); color: var(--text-primary); border: 1px 
 .pop-item small { color: var(--text-muted); font-size: 0.75rem; white-space: nowrap; }
 .pop-empty { padding: 10px; color: var(--text-muted); font-size: 0.85rem; }
 .pop-sep { height: 1px; background: var(--border); margin: 8px 2px; }
+
+/* ── icon set ── */
+.i { width: 1.15em; height: 1.15em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -0.2em; }
+.menu-item .i { width: 18px; height: 18px; color: var(--text-secondary); }
+.menu-item:hover .i { color: var(--accent); }
+.btn .i, .pop-action .i { width: 16px; height: 16px; }
+.modal-close { display: inline-flex; align-items: center; justify-content: center; }
+.modal-close .i { width: 18px; height: 18px; }
+.modal-header h2 .i.lead { width: 20px; height: 20px; margin-inline-end: 4px; color: var(--accent); }
+.toast-icon { display: inline-flex; align-items: center; justify-content: center; }
+.toast-icon .i { width: 16px; height: 16px; stroke-width: 2.5; }
+.queue-item-status.completed::before { content: ''; display: inline-block; width: 14px; height: 14px; margin-inline-end: 4px; vertical-align: -2px; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat; }
+
+/* «بينزّل في» chip — final */
+.folder-chip { display: inline-flex; align-items: center; gap: 10px; height: 42px; padding: 0 16px; line-height: 1; font-size: 1rem; cursor: pointer; transition: border-color var(--transition), background var(--transition), transform 0.05s; }
+.folder-chip .chip-ico { width: 18px; height: 18px; color: var(--accent); }
+.folder-chip .chip-caret { width: 16px; height: 16px; color: var(--text-secondary); transition: transform var(--transition); }
+.folder-chip[aria-expanded="true"] .chip-caret { transform: rotate(180deg); color: var(--text-primary); }
+.folder-chip:hover { background: var(--accent-light); border-color: var(--accent); }
+.folder-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.folder-chip:active { transform: scale(0.98); }
+.menu-item:focus-visible, .badge:focus-visible, .pop-item:focus-visible, .pop-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* tables/stat cards: everything centred in its cell (Ahmed 22/11) */
+.stat { align-items: center; text-align: center; justify-content: center; }
+.author-row { text-align: center; }

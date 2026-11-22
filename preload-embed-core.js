@@ -23,6 +23,7 @@
  */
 
 const { ipcRenderer } = require('electron');
+const { setLabel, getLabel } = require('./preload-icons.js');
 
 const BTN_CLASS = 'mg-dl-btn';
 const BTN_LABEL = '⬇ تحميل';
@@ -54,7 +55,7 @@ module.exports = function initEmbed(rules) {
   // Trusted-Types-safe element builder (see folderRow).
   function mkEl(tag, text, css) {
     const n = document.createElement(tag);
-    if (text) n.textContent = text;
+    if (text) setLabel(n, text);
     if (css) n.style.cssText = css;
     return n;
   }
@@ -75,20 +76,20 @@ module.exports = function initEmbed(rules) {
   }
 
   function flash(btn, text, restore) {
-    const old = btn.textContent;
-    btn.textContent = text;
-    setTimeout(() => { btn.textContent = restore || old; }, 2500);
+    const old = getLabel(btn);
+    setLabel(btn, text);
+    setTimeout(() => { setLabel(btn, restore || old); }, 2500);
   }
 
   /* ── per-post button state ────────────────────────────────────────── */
 
   function paint(btn) {
     if (btn.dataset.done === '1') {
-      btn.textContent = '✓ اتحمّل';
+      setLabel(btn, '✓ اتحمّل');
       btn.style.background = '#16a34a';
       btn.title = 'اتحمّل قبل كده — دوس لو عايز تحمّله تاني';
     } else {
-      btn.textContent = BTN_LABEL;
+      setLabel(btn, BTN_LABEL);
       btn.style.background = btn.dataset.color || '#7c3aed';
       btn.title = '';
     }
@@ -115,7 +116,7 @@ module.exports = function initEmbed(rules) {
 
   function updateSelCount() {
     const el = $('#mg-sel-btn');
-    if (el) el.textContent = '⬇ حمّل المحدد (' + selCount() + ')';
+    if (el) setLabel(el, '⬇ حمّل المحدد (' + selCount() + ')');
   }
 
   function downloadSelected() {
@@ -275,7 +276,7 @@ module.exports = function initEmbed(rules) {
 
   function mkBtn(label, title, bg, onClick) {
     const b = document.createElement('button');
-    b.textContent = label;
+    setLabel(b, label);
     b.title = title;
     b.style.cssText = btnStyle(bg);
     b.addEventListener('click', onClick);
@@ -326,14 +327,14 @@ module.exports = function initEmbed(rules) {
 
     const sel = mkBtn('⬇ حمّل المحدد (0)', 'يحمّل اللي علّمت عليه (✓ في الركن)', '#9333ea', () => {
       const n = downloadSelected();
-      if (n > 0) { sel.textContent = '✓ ضفنا ' + n; setTimeout(updateSelCount, 2500); }
+      if (n > 0) { setLabel(sel, '✓ ضفنا ' + n); setTimeout(updateSelCount, 2500); }
     });
     sel.id = 'mg-sel-btn';
     sel.style.display = 'none';
 
     const toggle = mkBtn('☑ تحديد', 'يفعّل وضع التحديد عشان تعلّم على كذا حاجة وتحمّلهم مرة واحدة', '#0ea5e9', () => {
       const on = document.documentElement.classList.toggle('mg-selecting');
-      toggle.textContent = on ? '✓ خلّصت تحديد' : '☑ تحديد';
+      setLabel(toggle, on ? '✓ خلّصت تحديد' : '☑ تحديد');
       toggle.style.background = on ? '#0369a1' : '#0ea5e9';
       sel.style.display = on ? '' : 'none';
       if (!on) { for (const cb of $$('.mg-sel:checked')) cb.checked = false; updateSelCount(); }
@@ -397,7 +398,7 @@ module.exports = function initEmbed(rules) {
     const relog = mkBtn('🔑 سجّل دخول من جديد', 'يمسح الجلسة الحالية وتسجّل دخول بإيدك، وبعدين يعيد الصفحة', '#2563eb', () => {
       relog.textContent = '… بيفتح صفحة الدخول';
       ipcRenderer.invoke('embed:relogin').catch(() => {})
-        .then(() => { relog.textContent = '🔑 سجّل دخول من جديد'; });
+        .then(() => { setLabel(relog, '🔑 سجّل دخول من جديد'); });
     });
     row.appendChild(relog);
     row.appendChild(mkBtn('🌐 افتح في المتصفح', 'يفتح نفس الصفحة في متصفحك — لو فاضية هناك كمان يبقى الموقع نفسه', '#374151',

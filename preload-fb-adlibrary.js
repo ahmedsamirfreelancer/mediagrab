@@ -18,6 +18,7 @@
  * reuses the existing 'embed:*' handlers since the platform is still FB.
  */
 const { ipcRenderer } = require('electron');
+const { setLabel } = require('./preload-icons.js');
 
 (function () {
   const CARD_FLAG = 'mgAdCard';        // dataset flag marking a processed card
@@ -229,7 +230,7 @@ const { ipcRenderer } = require('electron');
   function markDone(id) {
     downloadedSet.add(String(id));
     const dl = document.querySelector('.mg-card-dl[data-adid="' + id + '"]');
-    if (dl) { dl.textContent = '✓ اتحمّل'; dl.style.background = '#16a34a'; }
+    if (dl) { setLabel(dl, '✓ اتحمّل'); dl.style.background = '#16a34a'; }
     const cb = document.querySelector('.mg-card-sel[data-adid="' + id + '"]');
     if (cb) cb.checked = false;
   }
@@ -251,18 +252,18 @@ const { ipcRenderer } = require('electron');
     dl.className = 'mg-card-dl';
     dl.setAttribute('data-adid', id);
     dl.style.cssText = chip(downloadedSet.has(String(id)) ? '#16a34a' : '#7c3aed');
-    dl.textContent = downloadedSet.has(String(id)) ? '✓ اتحمّل' : '⬇ تحميل';
+    setLabel(dl, downloadedSet.has(String(id)) ? '✓ اتحمّل' : '⬇ تحميل');
     dl.title = 'حمّل إبداع الإعلان (صورة/فيديو)';
     dl.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
       const n = sendDownload([data()]);
-      if (n) { dl.textContent = '✓ في الطابور'; dl.style.background = '#16a34a'; markDone(id); }
+      if (n) { setLabel(dl, '✓ في الطابور'); dl.style.background = '#16a34a'; markDone(id); }
     }, true);
     bar.appendChild(dl);
 
     const txt = document.createElement('button');
     txt.style.cssText = chip('#0ea5e9');
-    txt.textContent = '📋 نص';
+    setLabel(txt, '📋 نص');
     txt.title = 'انسخ نص الإعلان';
     txt.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -273,7 +274,7 @@ const { ipcRenderer } = require('electron');
 
     const adBtn = document.createElement('button');
     adBtn.style.cssText = chip('#db2777');
-    adBtn.textContent = '🔎 إعلان';
+    setLabel(adBtn, '🔎 إعلان');
     adBtn.title = 'افتح الإعلان نفسه في المتصفح (تشوف تفاصيله)';
     adBtn.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -284,7 +285,7 @@ const { ipcRenderer } = require('electron');
 
     const link = document.createElement('button');
     link.style.cssText = chip('#0891b2');
-    link.textContent = '🔗 لاند';
+    setLabel(link, '🔗 لاند');
     link.title = 'انسخ رابط صفحة الهبوط (الموقع)';
     link.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -296,7 +297,7 @@ const { ipcRenderer } = require('electron');
 
     const openLand = document.createElement('button');
     openLand.style.cssText = chip('#0d9488');
-    openLand.textContent = '🌐 افتح';
+    setLabel(openLand, '🌐 افتح');
     openLand.title = 'افتح موقع الهبوط في المتصفح (كروم)';
     openLand.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -308,7 +309,7 @@ const { ipcRenderer } = require('electron');
 
     const page = document.createElement('button');
     page.style.cssText = chip('#9333ea');
-    page.textContent = '📑 الصفحة';
+    setLabel(page, '📑 الصفحة');
     page.title = 'كل إعلانات نفس الصفحة';
     page.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -350,7 +351,7 @@ const { ipcRenderer } = require('electron');
   function updateSelCount() {
     const n = document.querySelectorAll('.mg-card-sel:checked').length;
     const el = document.getElementById('mg-sel-btn');
-    if (el) el.textContent = '⬇ حمّل المحدد (' + n + ')';
+    if (el) setLabel(el, '⬇ حمّل المحدد (' + n + ')');
   }
 
   function downloadAllVisible() {
@@ -384,14 +385,14 @@ const { ipcRenderer } = require('electron');
       if (Array.isArray(ids)) downloadedSet = new Set(ids.map(String));
     } catch {}
     for (const dl of document.querySelectorAll('.mg-card-dl[data-adid]')) {
-      if (downloadedSet.has(dl.getAttribute('data-adid'))) { dl.textContent = '✓ اتحمّل'; dl.style.background = '#16a34a'; }
+      if (downloadedSet.has(dl.getAttribute('data-adid'))) { setLabel(dl, '✓ اتحمّل'); dl.style.background = '#16a34a'; }
     }
   }
 
   async function resetMarks() {
     try { await ipcRenderer.invoke('embed:clearDownloaded'); } catch {}
     downloadedSet = new Set();
-    for (const dl of document.querySelectorAll('.mg-card-dl[data-adid]')) { dl.textContent = '⬇ تحميل'; dl.style.background = '#7c3aed'; }
+    for (const dl of document.querySelectorAll('.mg-card-dl[data-adid]')) { setLabel(dl, '⬇ تحميل'); dl.style.background = '#7c3aed'; }
   }
 
   // Force a stable font on our own toolbar + buttons so Facebook's page CSS
@@ -424,26 +425,26 @@ const { ipcRenderer } = require('electron');
     bar.appendChild(brand);
 
     const dlAll = document.createElement('button');
-    dlAll.textContent = '⬇ حمّل كل الظاهر';
+    setLabel(dlAll, '⬇ حمّل كل الظاهر');
     dlAll.style.cssText = btnStyle('#7c3aed');
     dlAll.addEventListener('click', downloadAllVisible);
     bar.appendChild(dlAll);
 
     const selToggle = document.createElement('button');
-    selToggle.textContent = '☑ تحديد';
+    setLabel(selToggle, '☑ تحديد');
     selToggle.style.cssText = btnStyle('#0ea5e9');
     bar.appendChild(selToggle);
 
     const selBtn = document.createElement('button');
     selBtn.id = 'mg-sel-btn';
-    selBtn.textContent = '⬇ حمّل المحدد (0)';
+    setLabel(selBtn, '⬇ حمّل المحدد (0)');
     selBtn.style.cssText = btnStyle('#9333ea') + 'display:none;';
     selBtn.addEventListener('click', downloadSelected);
     bar.appendChild(selBtn);
 
     selToggle.addEventListener('click', () => {
       const on = document.documentElement.classList.toggle('mg-selecting');
-      selToggle.textContent = on ? '✓ خلّصت تحديد' : '☑ تحديد';
+      setLabel(selToggle, on ? '✓ خلّصت تحديد' : '☑ تحديد');
       selToggle.style.background = on ? '#0369a1' : '#0ea5e9';
       selBtn.style.display = on ? '' : 'none';
       for (const cb of document.querySelectorAll('.mg-card-sel')) cb.style.display = on ? 'block' : 'none';
@@ -451,25 +452,25 @@ const { ipcRenderer } = require('electron');
     });
 
     const reset = document.createElement('button');
-    reset.textContent = '↺ صفّر';
+    setLabel(reset, '↺ صفّر');
     reset.style.cssText = btnStyle('#374151');
     reset.addEventListener('click', resetMarks);
     bar.appendChild(reset);
 
     const stopBtn = document.createElement('button');
-    stopBtn.textContent = '⏹ إيقاف';
+    setLabel(stopBtn, '⏹ إيقاف');
     stopBtn.style.cssText = btnStyle('#b91c1c');
     stopBtn.addEventListener('click', async () => {
       try {
         const r = await ipcRenderer.invoke('embed:stopAll');
-        stopBtn.textContent = '⏹ وقفنا ' + ((r && r.cancelled) || 0);
-        setTimeout(() => { stopBtn.textContent = '⏹ إيقاف'; }, 2500);
+        setLabel(stopBtn, '⏹ وقفنا ' + ((r && r.cancelled) || 0));
+        setTimeout(() => { setLabel(stopBtn, '⏹ إيقاف'); }, 2500);
       } catch {}
     });
     bar.appendChild(stopBtn);
 
     const openBtn = document.createElement('button');
-    openBtn.textContent = '📂 فتح المجلد';
+    setLabel(openBtn, '📂 فتح المجلد');
     openBtn.style.cssText = btnStyle('#2563eb');
     openBtn.addEventListener('click', () => { ipcRenderer.invoke('embed:openFolder', currentFolder()); });
     bar.appendChild(openBtn);
@@ -477,7 +478,7 @@ const { ipcRenderer } = require('electron');
     // Real window close — see the note in the embed preloads: a full-screen
     // window on macOS has no visible traffic lights.
     const closeWin = document.createElement('button');
-    closeWin.textContent = '✕ إغلاق النافذة';
+    setLabel(closeWin, '✕ إغلاق النافذة');
     closeWin.title = 'يقفل النافذة ويرجّعك للبرنامج';
     closeWin.style.cssText = btnStyle('#7f1d1d');
     closeWin.addEventListener('click', () => {
@@ -486,7 +487,7 @@ const { ipcRenderer } = require('electron');
     bar.appendChild(closeWin);
 
     const note = document.createElement('span');
-    note.textContent = '📁 كل إعلان بيتحفظ في فولدر باسم صفحته';
+    setLabel(note, '📁 كل إعلان بيتحفظ في فولدر باسم صفحته');
     note.style.cssText = 'opacity:.65;font-size:12px;white-space:nowrap;margin-right:auto;';
     bar.appendChild(note);
 

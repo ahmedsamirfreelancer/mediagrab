@@ -10,10 +10,36 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- One icon set for the whole app: 24px grid, 2px stroke, round caps/joins. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+      <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="M3 18V6a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V10"/><path d="M3.5 18.5 6 11h15.2a1 1 0 0 1 .96 1.28l-1.8 5.6A2 2 0 0 1 18.5 19H5a1.5 1.5 0 0 1-1.5-.5z"/></symbol>
+      <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></symbol>
+      <symbol id="i-external" viewBox="0 0 24 24"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></symbol>
+      <symbol id="i-megaphone" viewBox="0 0 24 24"><path d="M3 11v3a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15 8.5a5 5 0 0 1 0 7"/><path d="M18 6a9 9 0 0 1 0 12"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></symbol>
+      <symbol id="i-notes" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h6"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+      <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+    </defs>
+  </svg>
 
   <!-- App update banner (Electron) — appears at the top when a new version is ready -->
   <div id="appupdate-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:99999; background:linear-gradient(90deg,#7c3aed,#a855f7); color:#fff; padding:12px 18px; align-items:center; justify-content:center; gap:14px; box-shadow:0 2px 14px rgba(0,0,0,0.35); font-size:14px;">
-    <span id="appupdate-banner-text">🎉 في تحديث جديد جاهز للبرنامج</span>
+    <span id="appupdate-banner-text">في تحديث جديد جاهز للبرنامج</span>
     <button id="appupdate-banner-btn" style="background:#fff; color:#7c3aed; font-weight:700; padding:7px 18px; border-radius:6px; border:none; cursor:pointer;">أعد التشغيل وثبّت دلوقتي</button>
     <button id="appupdate-banner-later" style="background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.6); padding:7px 14px; border-radius:6px; cursor:pointer;">بعدين</button>
   </div>
@@ -25,7 +51,7 @@
     <div class="modal">
       <div class="modal-header">
         <h2>الإعدادات</h2>
-        <button class="modal-close" id="settings-close">&times;</button>
+        <button class="modal-close" id="settings-close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
       </div>
       <div class="modal-body">
         <div class="setting-group">
@@ -179,13 +205,13 @@
   <div id="notes-modal" class="modal-overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <h2>📝 منتجات الكرييتفات</h2>
-        <button class="modal-close" id="notes-close">&times;</button>
+        <h2><svg class="i lead" aria-hidden="true"><use href="#i-notes"/></svg> منتجات الكرييتفات</h2>
+        <button class="modal-close" id="notes-close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
       </div>
       <div class="modal-body">
         <div class="notes-add-row">
           <input type="text" id="notes-input" placeholder="اكتب اسم المنتج واضغط Enter..." spellcheck="false" autocomplete="off">
-          <button class="btn btn-primary" id="notes-add-btn">➕ إضافة</button>
+          <button class="btn btn-primary" id="notes-add-btn"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> إضافة</button>
         </div>
         <div class="notes-progress" id="notes-progress"></div>
         <div id="notes-body">
@@ -193,7 +219,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" id="notes-clear-done" title="مسح المنتجات اللي اتحمّلت">🧹 مسح المُحمّل</button>
+        <button class="btn btn-ghost" id="notes-clear-done" title="مسح المنتجات اللي اتحمّلت"><svg class="i" aria-hidden="true"><use href="#i-trash"/></svg> مسح المُحمّل</button>
         <button class="btn btn-danger" id="notes-clear-all">مسح الكل</button>
       </div>
     </div>
@@ -204,7 +230,7 @@
     <div class="modal">
       <div class="modal-header">
         <h2>إحصائيات</h2>
-        <button class="modal-close" id="stats-close">&times;</button>
+        <button class="modal-close" id="stats-close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
       </div>
       <div class="modal-body" id="stats-body">جاري التحميل...</div>
     </div>
@@ -215,7 +241,7 @@
     <div class="modal">
       <div class="modal-header">
         <h2>تحميل دفعة روابط</h2>
-        <button class="modal-close" id="batch-close">&times;</button>
+        <button class="modal-close" id="batch-close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
       </div>
       <div class="modal-body">
         <div class="setting-group">
@@ -236,8 +262,8 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="batch-paste">📋 لصق من الحافظة</button>
-        <button class="btn btn-primary" id="batch-download">⬇ نزّل الكل</button>
+        <button class="btn btn-secondary" id="batch-paste"><svg class="i" aria-hidden="true"><use href="#i-clipboard"/></svg> لصق من الحافظة</button>
+        <button class="btn btn-primary" id="batch-download"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg> نزّل الكل</button>
       </div>
     </div>
   </div>
@@ -265,14 +291,14 @@
           <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
         </button>
         <div class="menu hidden" id="menu" role="menu">
-          <button class="menu-item" id="settings-btn" role="menuitem">⚙️ <span>الإعدادات</span></button>
-          <button class="menu-item" id="stats-btn" role="menuitem">📊 <span id="stats-menu-label">نزّلت النهارده: —</span></button>
+          <button class="menu-item" id="settings-btn" role="menuitem"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg> <span>الإعدادات</span></button>
+          <button class="menu-item" id="stats-btn" role="menuitem"><svg class="i" aria-hidden="true"><use href="#i-chart"/></svg> <span id="stats-menu-label">نزّلت النهارده: —</span></button>
           <div class="menu-sep"></div>
-          <button class="menu-item" id="adlib-menu-btn" role="menuitem">📢 <span>مكتبة الإعلانات</span></button>
-          <button class="menu-item" id="batch-btn" role="menuitem">📋 <span>تحميل دفعة روابط</span></button>
-          <button class="menu-item" id="img-search-btn" role="menuitem" title="انسخ صورة المنتج الأول (أو Ctrl+V)">🖼️ <span>بحث بصورة</span></button>
-          <button class="menu-item" id="open-home-btn" role="menuitem">🌐 <span id="open-home-label">افتح المنصة من غير بحث</span></button>
-          <button class="menu-item" id="notes-btn" role="menuitem">📝 <span>منتجات الكرييتفات</span></button>
+          <button class="menu-item" id="adlib-menu-btn" role="menuitem"><svg class="i" aria-hidden="true"><use href="#i-megaphone"/></svg> <span>مكتبة الإعلانات</span></button>
+          <button class="menu-item" id="batch-btn" role="menuitem"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg> <span>تحميل دفعة روابط</span></button>
+          <button class="menu-item" id="img-search-btn" role="menuitem" title="انسخ صورة المنتج الأول (أو Ctrl+V)"><svg class="i" aria-hidden="true"><use href="#i-image"/></svg> <span>بحث بصورة</span></button>
+          <button class="menu-item" id="open-home-btn" role="menuitem"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg> <span id="open-home-label">افتح المنصة من غير بحث</span></button>
+          <button class="menu-item" id="notes-btn" role="menuitem"><svg class="i" aria-hidden="true"><use href="#i-notes"/></svg> <span>منتجات الكرييتفات</span></button>
         </div>
       </div>
       <div class="connection-status" id="connection-status" style="display:none"><span class="status-dot"></span><span class="status-text"></span></div>
@@ -300,15 +326,15 @@
         <div class="launch-folder">
           <span>بينزّل في:</span>
           <div class="folder-wrap">
-            <button class="folder-chip" id="folder-chip" type="button" title="غيّر الفولدر (Ctrl+L)" aria-haspopup="true" aria-expanded="false"><span class="chip-ico">📁</span><span id="folder-chip-name">—</span><span class="chip-caret">⌄</span></button>
+            <button class="folder-chip" id="folder-chip" type="button" title="غيّر الفولدر (Ctrl+L)" aria-haspopup="true" aria-expanded="false"><svg class="i chip-ico" aria-hidden="true"><use href="#i-folder"/></svg><span id="folder-chip-name">—</span><svg class="i chip-caret" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
             <div class="folder-pop hidden" id="folder-pop" role="dialog">
               <input type="text" id="subfolder-input" placeholder="اسم فولدر جديد واضغط Enter" spellcheck="false" autocomplete="off">
               <button class="pop-suggest hidden" id="folder-suggest" type="button"></button>
               <div class="pop-title">آخر الفولدرات</div>
               <div class="pop-list" id="folder-list"></div>
               <div class="pop-sep"></div>
-              <button class="pop-action" id="folder-pick" type="button">📂 <span>اختار مكان تاني…</span></button>
-              <button class="pop-action" id="folder-open" type="button">↗ <span>افتح الفولدر الحالي</span></button>
+              <button class="pop-action" id="folder-pick" type="button"><svg class="i" aria-hidden="true"><use href="#i-folder-open"/></svg> <span>اختار مكان تاني…</span></button>
+              <button class="pop-action" id="folder-open" type="button"><svg class="i" aria-hidden="true"><use href="#i-external"/></svg> <span>افتح الفولدر الحالي</span></button>
             </div>
           </div>
           <span class="folder-path" id="folder-path"></span>
@@ -323,7 +349,7 @@
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
               <h2>مكتبة إعلانات فيسبوك</h2>
             </div>
-            <button class="btn btn-ghost btn-sm" id="adlib-back-btn" type="button">← رجوع</button>
+            <button class="btn btn-ghost btn-sm" id="adlib-back-btn" type="button"><svg class="i" aria-hidden="true"><use href="#i-arrow-right"/></svg> رجوع</button>
             <p class="adlib-sub">جسّس على إعلانات أي منافس — فلتر بالدولة والنوع، وحمّل الإبداعات (صورة/فيديو) بدوسة زر. بيانات عامة بتشتغل من جهازك مباشرة.</p>
           </div>
 
@@ -361,7 +387,7 @@
                 <option value="QA">🇶🇦 قطر</option>
                 <option value="MA">🇲🇦 المغرب</option>
                 <option value="US">🇺🇸 أمريكا</option>
-                <option value="ALL">🌍 كل الدول</option>
+                <option value="ALL">كل الدول</option>
               </select>
             </label>
 
@@ -394,7 +420,7 @@
             </label>
 
             <label class="adlib-field">
-              <span>مدة التشغيل (للمنتجات الرابحة 🔥)</span>
+              <span>مدة التشغيل (للمنتجات الرابحة)</span>
               <select id="adlib-duration">
                 <option value="0" selected>أي مدة</option>
                 <option value="7">شغّال 7 أيام أو أكتر</option>
@@ -410,7 +436,7 @@
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               <span>افتح مكتبة الإعلانات</span>
             </button>
-            <span class="adlib-note">💡 جوّه النافذة: ⬇ تحميل الإبداع · 📋 نسخ النص · 🔗 رابط الهبوط · 📑 كل إعلانات نفس الصفحة</span>
+            <span class="adlib-note">جوّه النافذة: تحميل الإبداع · نسخ النص · رابط الهبوط · كل إعلانات نفس الصفحة</span>
           </div>
         </div>
       </section>

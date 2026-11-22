@@ -207,7 +207,7 @@
           : `تم: ${truncate(data.title || 'فيديو', 50)}`;
       const actions = data.filePath ? [
         { label: '▶ فتح الملف', onClick: () => openDownloadedFile(data.filePath) },
-        { label: '📁 المجلد', onClick: () => openDownloadedFolder(data.filePath) },
+        { label: 'المجلد', onClick: () => openDownloadedFolder(data.filePath) },
       ] : [];
       toast(msg, 'success', 8000, actions);
       onTaskFinished(data.id, data.skipped ? 'skipped' : 'completed');
@@ -341,7 +341,7 @@
       if (estimated <= ds.freeBytes * 0.9) return true;
       const need = (estimated / 1024 / 1024 / 1024).toFixed(2);
       const free = (ds.freeBytes / 1024 / 1024 / 1024).toFixed(2);
-      return confirm(`⚠️ المساحة الفاضية قليلة!\n\nمتوقع: ${need} GB\nفاضي: ${free} GB\n\nتكمّل؟`);
+      return confirm(`المساحة الفاضية قليلة!\n\nمتوقع: ${need} GB\nفاضي: ${free} GB\n\nتكمّل؟`);
     } catch { return true; }
   }
 
@@ -733,7 +733,7 @@
         </label>
         <div class="note-name">${escapeHtml(n.name)}</div>
         <div class="note-actions">
-          <button class="btn btn-secondary btn-sm note-search" title="ابحث عن المنتج ده دلوقتي">🔍 ابحث</button>
+          <button class="btn btn-secondary btn-sm note-search" title="ابحث عن المنتج ده دلوقتي"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg> ابحث</button>
           <button class="icon-btn note-delete" title="حذف">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
           </button>
@@ -998,7 +998,7 @@
     const labels = {
       queued: 'في الانتظار',
       downloading: 'يحمّل',
-      completed: '✓ تم',
+      completed: 'تم',
       error: 'خطأ',
       cancelled: 'أُلغي',
     };
@@ -1016,11 +1016,11 @@
     try {
       const { loggedIn, cookiesFile } = await window.electronAPI.instagram.status();
       if (loggedIn) {
-        statusEl.textContent = 'مسجل دخول Instagram ✓';
+        statusEl.textContent = 'مسجل دخول Instagram';
         if (loginBtn) loginBtn.textContent = 'إعادة تسجيل دخول';
         if (logoutBtn) logoutBtn.style.display = '';
       } else if (cookiesFile) {
-        statusEl.textContent = 'كوكيز مستوردة ✓ — جاهز للبحث';
+        statusEl.textContent = 'كوكيز مستوردة — جاهز للبحث';
         if (loginBtn) loginBtn.textContent = 'تسجيل دخول Instagram';
         if (logoutBtn) logoutBtn.style.display = '';
       } else {
@@ -1091,7 +1091,7 @@
     const labels = {
       idle: '—',
       checking: 'جاري الفحص...',
-      uptodate: 'أنت على آخر نسخة ✓',
+      uptodate: 'أنت على آخر نسخة',
       available: 'في تحديث جديد — بينزّل...',
       downloading: `بينزّل التحديث... ${s.progress || 0}%`,
       downloaded: `تحديث جاهز (v${s.version || ''}) — أعد التشغيل عشان يتثبّت`,
@@ -1134,7 +1134,7 @@
           else if (r && r.error) toast('تعذّر الفحص — اتأكد من النت', 'error');
           else if (r && r.manual && r.latest && r.latest !== r.current) toast(`في نسخة أحدث v${r.latest} — نزّلها من صفحة الإصدارات`, 'success');
           else if (r && r.latest && r.latest !== r.current) toast(`في تحديث جديد v${r.latest} — بينزّل دلوقتي`, 'success');
-          else toast('أنت على آخر نسخة ✓', 'success');
+          else toast('أنت على آخر نسخة', 'success');
         } catch (e) { toast('تعذّر الفحص — اتأكد من النت', 'error'); }
         checkBtn.disabled = false; checkBtn.textContent = 'فحص التحديثات';
       });
@@ -1163,11 +1163,11 @@
     try {
       const { loggedIn, cookiesFile } = await window.electronAPI.facebook.status();
       if (loggedIn) {
-        statusEl.textContent = 'مسجل دخول Facebook ✓';
+        statusEl.textContent = 'مسجل دخول Facebook';
         if (loginBtn) loginBtn.textContent = 'إعادة تسجيل دخول';
         if (logoutBtn) logoutBtn.style.display = '';
       } else if (cookiesFile) {
-        statusEl.textContent = 'كوكيز مستوردة ✓ — جاهز للبحث';
+        statusEl.textContent = 'كوكيز مستوردة — جاهز للبحث';
         if (loginBtn) loginBtn.textContent = 'تسجيل دخول Facebook';
         if (logoutBtn) logoutBtn.style.display = '';
       } else {
@@ -1189,7 +1189,7 @@
         try {
           const r = await window.electronAPI.cookies.import(platform);
           if (r?.success) {
-            toast('تم استيراد الكوكيز ✓', 'success');
+            toast('تم استيراد الكوكيز', 'success');
             if (onDone) onDone();
           } else if (!r?.cancelled) {
             toast(r?.error || 'فشل الاستيراد', 'error');
@@ -1362,11 +1362,11 @@
   function toast(message, type = 'info', duration = 4000, actions = []) {
     const el = document.createElement('div');
     el.className = `toast ${type}`;
-    const icons = { success: '✓', error: '✕', warning: '!', info: 'i' };
+    const icons = { success: 'check', error: 'x', warning: 'alert', info: 'info' };
 
     const main = document.createElement('div');
     main.className = 'toast-main';
-    main.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-msg">${escapeHtml(message)}</span>`;
+    main.innerHTML = `<span class="toast-icon"><svg class="i" aria-hidden="true"><use href="#i-${icons[type] || icons.info}"/></svg></span><span class="toast-msg">${escapeHtml(message)}</span>`;
     el.appendChild(main);
 
     if (actions && actions.length) {

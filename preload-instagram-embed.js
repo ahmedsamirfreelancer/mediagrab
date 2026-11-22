@@ -10,6 +10,7 @@
  */
 
 const initEmbed = require('./preload-embed-core.js');
+const { setLabel } = require('./preload-icons.js');
 
 const TILE_SEL = 'a[href*="/reel/"], a[href*="/tv/"], a[href*="/p/"]';
 const SEARCH_PAGE = /^\/explore\/search/;
@@ -311,7 +312,7 @@ initEmbed({
     const badge = document.createElement('div');
     badge.className = 'mg-type';
     badge.setAttribute('data-vid', card.id);
-    badge.textContent = card.kind === 'video' ? '🎬 فيديو' : '📷 صورة';
+    setLabel(badge, card.kind === 'video' ? '🎬 فيديو' : '📷 صورة');
     badge.style.cssText = 'position:absolute;top:42px;left:8px;z-index:50;padding:3px 8px;border-radius:7px;'
       + 'font-size:11px;font-weight:700;color:#fff;direction:rtl;box-shadow:0 1px 4px rgba(0,0,0,.6);'
       + 'background:' + (card.kind === 'video' ? '#16a34a' : '#6b7280') + ';';
