@@ -464,7 +464,7 @@
       dom.mainInput.focus();
       return toast('الصق لينك فيديو أو اكتب كلمة بحث', 'warning');
     }
-    if (!isValidUrl(text)) return state.platform === 'youtube' ? ytSearch(text) : openPopup(state.platform, { query: text });
+    if (!isValidUrl(text)) return (state.platform === 'youtube' && state.env.platform !== 'android') ? ytSearch(text) : openPopup(state.platform, { query: text });
 
     // A link: its own site decides, not the open tab.
     const key = detectPlatform(text) || state.platform;
@@ -484,12 +484,12 @@
     const link = isValidUrl(text);
     const key = link ? (detectPlatform(text) || state.platform) : state.platform;
     const willDownload = !text || (link && isSinglePost(key, text));
-    dom.goLabel.textContent = willDownload ? 'نزّل' : (!link && key === 'youtube' ? 'ابحث' : 'افتح');
+    dom.goLabel.textContent = willDownload ? 'نزّل' : (!link && key === 'youtube' && state.env.platform !== 'android' ? 'ابحث' : 'افتح');
     dom.goBtn.classList.toggle('is-download', willDownload);
     dom.launchHint.textContent = !text ? ''
       : willDownload ? `لينك فيديو من ${platformName(key)} — هينزّل على طول`
         : link ? `هنفتح الصفحة دي في شباك ${platformName(key)} وعليها أزرار تحميل`
-          : (key === 'youtube' ? 'هنبحث في يوتيوب ونعرضلك الفيديوهات الطويلة هنا' : `هنبحث في ${platformName(key)} — دوس على أي شارة تحت عشان تغيّر الموقع`);
+          : (key === 'youtube' && state.env.platform !== 'android' ? 'هنبحث في يوتيوب ونعرضلك الفيديوهات الطويلة هنا' : `هنبحث في ${platformName(key)} — دوس على أي شارة تحت عشان تغيّر الموقع`);
   }
 
   /* ─── «بينزّل في» quick picker ────────────────────────────────────────────
