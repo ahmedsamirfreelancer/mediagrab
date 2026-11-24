@@ -1504,3 +1504,26 @@ textarea { background: var(--bg-input); color: var(--text-primary); border: 1px 
 .input-row { display: flex; gap: 8px; align-items: center; }
 .input-row input { flex: 1; min-width: 0; direction: ltr; }
 #output-dir[readonly] { cursor: default; }
+
+/* --- YouTube search results (in-app) --- */
+.yt-results { margin-bottom: 20px; }
+.yt-status { text-align: center; color: var(--text-secondary); padding: 14px 0; font-size: 14px; }
+.yt-status:empty { display: none; }
+.yt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.yt-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
+.yt-thumb { position: relative; display: block; width: 100%; aspect-ratio: 16/9; background: var(--bg-tertiary); border: 0; padding: 0; cursor: pointer; }
+.yt-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.yt-dur { position: absolute; bottom: 6px; left: 6px; background: rgba(0,0,0,.78); color: #fff; font-size: 12px; padding: 1px 6px; border-radius: 6px; direction: ltr; }
+.yt-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 30px; opacity: 0; background: rgba(0,0,0,.28); transition: opacity .15s; }
+.yt-thumb:hover .yt-play { opacity: 1; }
+.yt-meta { padding: 10px 12px 6px; flex: 1; }
+.yt-title { font-size: 14px; font-weight: 600; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.yt-channel { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.yt-card-actions { display: flex; gap: 8px; padding: 6px 12px 12px; }
+.yt-card-actions .btn { flex: 1; justify-content: center; }
+.yt-player-box { width: min(900px, 94vw); max-width: none; }
+.yt-player-body { background: #000; position: relative; }
+.yt-player-body video { width: 100%; max-height: 66vh; display: block; background: #000; }
+.yt-player-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 15px; pointer-events: none; }
+.yt-player-msg:empty { display: none; }
+.yt-player-actions { padding: 12px 16px; display: flex; justify-content: center; }

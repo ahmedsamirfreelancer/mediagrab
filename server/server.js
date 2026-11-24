@@ -1105,6 +1105,69 @@ function setConcurrency(n) {
   }
 }
 
+// ─── YouTube in-app search (long videos only) + ad-free stream ───────────────
+// Results come from yt-dlp itself (no ads, no page scraping); Shorts and live
+// streams are dropped, so only real long videos reach the list.
+const YT_MIN_SECONDS = 240;
+function runYtdlpLines(args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(YTDLP_PATH, args, { windowsHide: true });
+    let out = '';
+    const timer = setTimeout(() => { proc.kill(); reject(new Error('timeout')); }, timeoutMs);
+    proc.stdout.on('data', (d) => { out += d.toString('utf8'); });
+    proc.on('error', (e) => { clearTimeout(timer); reject(e); });
+    proc.on('close', () => { clearTimeout(timer); resolve(out); });
+  });
+}
+
+app.get('/api/yt/search', async (req, res) => {
+  const q = String(req.query.q || '').trim().slice(0, 200);
+  if (!q) return res.status(400).json({ error: 'اكتب كلمة بحث' });
+  try {
+    const out = await runYtdlpLines(['--flat-playlist', '--dump-json', '--no-warnings', 'ytsearch60:' + q], 60000);
+    const seen = new Set();
+    const items = [];
+    for (const line of out.split('\n')) {
+      if (!line.trim()) continue;
+      let j; try { j = JSON.parse(line); } catch (e) { continue; }
+      if (!j.id || !/^[\w-]{11}$/.test(j.id) || seen.has(j.id)) continue;
+      const isLive = j.live_status === 'is_live' || j.live_status === 'is_upcoming';
+      if (isLive || !j.duration || j.duration < YT_MIN_SECONDS) continue;
+      if (String(j.url || '').includes('/shorts/')) continue;
+      seen.add(j.id);
+      items.push({
+        id: j.id, title: j.title || j.id, channel: j.channel || j.uploader || '',
+        duration: j.duration, views: j.view_count || null,
+        thumb: 'https://i.ytimg.com/vi/' + j.id + '/mqdefault.jpg',
+      });
+    }
+    res.json({ items });
+  } catch (e) {
+    console.error('[yt-search]', e.message);
+    res.status(500).json({ error: 'البحث مشتغلش — جرّب تاني' });
+  }
+});
+
+// YouTube no longer serves a single file with picture + sound, so the player
+// gets a live remux: yt-dlp finds the two direct URLs, ffmpeg copies them
+// (no re-encoding) into a streaming webm. No ads exist on this path.
+app.get('/api/yt/play', async (req, res) => {
+  const id = String(req.query.id || '');
+  if (!/^[\w-]{11}$/.test(id)) return res.status(400).end();
+  let urls;
+  try {
+    const out = await runYtdlpLines(['-g', '--no-warnings', '--no-playlist', '-f', 'bv*[height<=720][ext=webm]+ba[ext=webm]/bv*[height<=720][vcodec^=vp9]+ba[ext=webm]', 'https://www.youtube.com/watch?v=' + id], 45000);
+    urls = out.split('\n').map((l) => l.trim()).filter((l) => /^https:\/\//.test(l));
+  } catch (e) { urls = []; }
+  if (urls.length < 2) return res.status(502).end();
+  const ff = spawn('ffmpeg', ['-v', 'error', '-i', urls[0], '-i', urls[1], '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-f', 'webm', '-live', '1', 'pipe:1'], { windowsHide: true });
+  res.setHeader('Content-Type', 'video/webm');
+  ff.stdout.pipe(res);
+  ff.stderr.on('data', (d) => console.error('[yt-play]', String(d).slice(0, 200)));
+  ff.on('error', () => res.end());
+  res.on('close', () => { try { ff.kill(); } catch (e) { /* already gone */ } });
+});
+
 // POST /api/download
 app.post('/api/download', async (req, res) => {
   try {

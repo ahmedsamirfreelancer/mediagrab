@@ -354,6 +354,109 @@
     toast(`فتحنا ${platformName(key)} — دوس «تحميل» على أي حاجة`, 'info', 5000);
   }
 
+  /* ─── YouTube search inside the app ───────────────────────────────────────
+   * The one exception to «no platform content inside» (Ahmed 24/11): a YouTube
+   * keyword shows long videos only (no Shorts / live), plays them from the
+   * extracted stream (no ads) and downloads from the same card. */
+  const yt = { token: 0, current: null };
+
+  function ytEl(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function ytClose() {
+    $('#yt-results').classList.add('hidden');
+    $('#yt-grid').textContent = '';
+    yt.token++;
+  }
+
+  function ytDownload(it) {
+    startDownload('https://www.youtube.com/watch?v=' + it.id, {
+      platform: 'youtube', title: it.title, thumbnail: it.thumb,
+    });
+    toast('ضفناه للتحميلات', 'success', 2500);
+  }
+
+  async function ytPlay(it) {
+    const modal = $('#yt-player-modal');
+    const video = $('#yt-player');
+    const msg = $('#yt-player-msg');
+    yt.current = it;
+    $('#yt-player-title').textContent = it.title;
+    msg.textContent = 'ثواني… بنجهّز الفيديو';
+    video.pause();
+    modal.classList.remove('hidden');
+    try {
+      video.onerror = () => { if (yt.current === it) msg.textContent = 'مقدرناش نشغّل الفيديو — جرّب نزّله'; };
+      video.onloadeddata = () => { msg.textContent = ''; };
+      video.src = '/api/yt/play?id=' + encodeURIComponent(it.id);
+      video.play().catch(() => {});
+    } catch (e) {
+      msg.textContent = 'مقدرناش نشغّل الفيديو — جرّب نزّله';
+    }
+  }
+
+  function ytClosePlayer() {
+    const video = $('#yt-player');
+    video.pause();
+    video.src = '';
+    yt.current = null;
+    $('#yt-player-modal').classList.add('hidden');
+  }
+
+  function ytCard(it) {
+    const card = ytEl('div', 'yt-card');
+    const thumb = ytEl('button', 'yt-thumb');
+    thumb.type = 'button';
+    const img = document.createElement('img');
+    img.src = it.thumb; img.alt = ''; img.loading = 'lazy';
+    thumb.append(img, ytEl('span', 'yt-dur', formatDuration(it.duration)), ytEl('span', 'yt-play', '▶'));
+    thumb.addEventListener('click', () => ytPlay(it));
+    const meta = ytEl('div', 'yt-meta');
+    meta.append(ytEl('div', 'yt-title', it.title), ytEl('div', 'yt-channel', it.channel));
+    const actions = ytEl('div', 'yt-card-actions');
+    const play = ytEl('button', 'btn btn-ghost btn-sm', 'شغّل');
+    play.addEventListener('click', () => ytPlay(it));
+    const dl = ytEl('button', 'btn btn-primary btn-sm', 'نزّل');
+    dl.addEventListener('click', () => ytDownload(it));
+    actions.append(play, dl);
+    card.append(thumb, meta, actions);
+    return card;
+  }
+
+  async function ytSearch(q) {
+    const my = ++yt.token;
+    const box = $('#yt-results');
+    const status = $('#yt-status');
+    const grid = $('#yt-grid');
+    box.classList.remove('hidden');
+    grid.textContent = '';
+    $('#yt-count').textContent = '';
+    status.textContent = 'بندوّر على «' + q + '»…';
+    try {
+      const r = await fetch('/api/yt/search?q=' + encodeURIComponent(q));
+      const j = await r.json();
+      if (my !== yt.token) return;
+      if (!r.ok) throw new Error(j.error || 'fail');
+      if (!j.items.length) { status.textContent = 'مفيش فيديوهات طويلة للكلمة دي — جرّب كلمة تانية'; return; }
+      status.textContent = '';
+      $('#yt-count').textContent = '(' + j.items.length + ')';
+      j.items.forEach((it) => grid.appendChild(ytCard(it)));
+    } catch (e) {
+      if (my === yt.token) status.textContent = 'البحث مشتغلش — اتأكد من النت وجرّب تاني';
+    }
+  }
+
+  function bindYt() {
+    $('#yt-close').addEventListener('click', ytClose);
+    $('#yt-player-close').addEventListener('click', ytClosePlayer);
+    $('#yt-player-modal').addEventListener('click', (e) => { if (e.target.id === 'yt-player-modal') ytClosePlayer(); });
+    $('#yt-player-dl').addEventListener('click', () => { if (yt.current) ytDownload(yt.current); });
+  }
+
   // The one action of the whole screen.
   function go() {
     const text = (dom.mainInput.value || '').trim();
@@ -361,7 +464,7 @@
       dom.mainInput.focus();
       return toast('الصق لينك فيديو أو اكتب كلمة بحث', 'warning');
     }
-    if (!isValidUrl(text)) return openPopup(state.platform, { query: text });
+    if (!isValidUrl(text)) return state.platform === 'youtube' ? ytSearch(text) : openPopup(state.platform, { query: text });
 
     // A link: its own site decides, not the open tab.
     const key = detectPlatform(text) || state.platform;
@@ -381,12 +484,12 @@
     const link = isValidUrl(text);
     const key = link ? (detectPlatform(text) || state.platform) : state.platform;
     const willDownload = !text || (link && isSinglePost(key, text));
-    dom.goLabel.textContent = willDownload ? 'نزّل' : 'افتح';
+    dom.goLabel.textContent = willDownload ? 'نزّل' : (!link && key === 'youtube' ? 'ابحث' : 'افتح');
     dom.goBtn.classList.toggle('is-download', willDownload);
     dom.launchHint.textContent = !text ? ''
       : willDownload ? `لينك فيديو من ${platformName(key)} — هينزّل على طول`
         : link ? `هنفتح الصفحة دي في شباك ${platformName(key)} وعليها أزرار تحميل`
-          : `هنبحث في ${platformName(key)} — دوس على أي شارة تحت عشان تغيّر الموقع`;
+          : (key === 'youtube' ? 'هنبحث في يوتيوب ونعرضلك الفيديوهات الطويلة هنا' : `هنبحث في ${platformName(key)} — دوس على أي شارة تحت عشان تغيّر الموقع`);
   }
 
   /* ─── «بينزّل في» quick picker ────────────────────────────────────────────
@@ -1312,6 +1415,7 @@
   // ─── Events ─────────────────────────────────────────
   function initEvents() {
     $$('.badge').forEach((b) => b.addEventListener('click', () => onBadge(b.dataset.platform)));
+    bindYt();
 
     dom.menuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
     dom.menu.addEventListener('click', () => toggleMenu(false));

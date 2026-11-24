@@ -334,6 +334,32 @@
         <span>ثانية واحدة…</span>
       </div>
 
+      <!-- YouTube search results (long videos only) -->
+      <section class="queue-section yt-results hidden" id="yt-results">
+        <div class="section-header">
+          <h2>نتايج يوتيوب <span class="queue-count" id="yt-count"></span></h2>
+          <div class="section-header-actions">
+            <button class="btn btn-ghost btn-sm" id="yt-close">قفل</button>
+          </div>
+        </div>
+        <div class="yt-status" id="yt-status"></div>
+        <div class="yt-grid" id="yt-grid"></div>
+      </section>
+
+      <div class="modal-overlay hidden" id="yt-player-modal">
+        <div class="modal yt-player-box">
+          <div class="modal-header">
+            <h2 id="yt-player-title"></h2>
+            <button class="modal-close" id="yt-player-close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+          </div>
+          <div class="yt-player-body">
+            <video id="yt-player" controls playsinline></video>
+            <div class="yt-player-msg" id="yt-player-msg"></div>
+          </div>
+          <div class="yt-player-actions"><button class="btn btn-primary" id="yt-player-dl">نزّل الفيديو</button></div>
+        </div>
+      </div>
+
       <!-- Download Queue -->
       <section class="queue-section" id="queue-section">
         <div class="section-header">
