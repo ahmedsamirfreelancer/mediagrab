@@ -13,7 +13,7 @@
 يعني: مفيش شبكة نتايج جوّه البرنامج، مفيش فلاتر، مفيش صفحات، مفيش معاينة. الموقع بيعرض نتايجه بنفسه (نفس اللي المستخدم بيشوفه في متصفحه — بالظبط وكامل)، وإحنا بنحط الأزرار بس. نفس النموذج شغّال على أندرويد كمان (`android-app`).
 
 ## Tech stack
-- **Electron 32** — تطبيق سطح المكتب (Windows + macOS)
+- **Electron 43** — تطبيق سطح المكتب (Windows + macOS)
 - **Node.js server** — Express + Socket.IO على `http://localhost:3456` (محرّك التحميل والطابور بس)
 - **yt-dlp.exe** — مُشغّل التنزيل الأساسي (`resources/yt-dlp.exe`)
 - **vanilla JS frontend** — مفيش React/Vue، كله في `server/public/app.js`
